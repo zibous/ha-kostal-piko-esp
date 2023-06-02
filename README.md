@@ -77,7 +77,7 @@ echo "Run WEBGUI: ${CURRENTURL}:6052"
 
 ### ESPHome Application
 See Esphome configuration file `kostal-piko.yaml` for the application <br>
-[![](https://img.shields.io/badge/> kostal_piko_esp32-orange?style=for-the-badge)](https://github.com/zibous/ha-kostal-pico/blob/master/esphome/config/kostal-piko.yaml)
+[![](https://img.shields.io/badge/> kostal_piko_esp32-orange?style=for-the-badge)]([https://github.com/zibous/ha-kostal-pico-esp/blob/master/esphome/config/kostal-piko.yaml](https://github.com/zibous/ha-kostal-piko-esp/blob/main/esphome/config/kostal-piko.yaml))
 
 <br>
 
