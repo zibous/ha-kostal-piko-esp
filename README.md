@@ -29,7 +29,9 @@ The ESPHome application loads the data from the Kostal PIKO 5.5 inverter at cycl
 ## Hardware
 
 ### Kostal Piko 5.5 Inverter
-<img src="kostal/kostal_piko55.png" align="center">
+<img src="kostal/kostal_piko55.png">
+
+<br>
 
 ## Software
 ### DOCKER - Install ESPHOME
