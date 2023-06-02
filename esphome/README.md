@@ -26,7 +26,7 @@ The ESPHome application loads the data from the Kostal PIKO 5.5 inverter at cycl
 - **ESP32** 240MHz, 520KB RAM, 4MB Flash (ESP32 AZ-DELIVERY-DEVKIT-V4)
   <img src="../docs/esp32_pinlayout.png">
 - **ESPHOME** Configuration<br>
-  [![](https://img.shields.io/badge/HA_KOSTAL_PICO_ESP.yaml-orange?style=for-the-badge)](https://github.com/zibous/ha-kostal-pico-esp/blob/master/esphome/config/kostal-piko.yaml)
+  [![](https://img.shields.io/badge/HA_KOSTAL_PICO_ESP.yaml-orange?style=for-the-badge)](https://github.com/zibous/ha-kostal-piko-esp/blob/main/esphome/config/kostal-piko.yaml)
 <br>
 
 ## Results
