@@ -1,0 +1,1154 @@
+## ---------------------------------------------------
+##  PIKO KOSTAL Dataservice
+## HARDWARE: HARDWARE: ESP32 240MHz, 520KB RAM, 4MB Flash
+##  Get the data from the KOSTAL Solar Electric Pico 5.5
+##
+## ---------------------------------------------------
+substitutions:
+  # device settings
+  device_name_short: "kostal-piko" 
+  device_description: "Read data from KOSTAL Solar Electric Pico 5.5 inverter"
+  projectname: "kostal.piko"
+  friendly_name: "kostal"
+  appversion: "1.0.0"
+  domain: !secret domain
+
+  ## all for the data service
+  dataurl: !secret kostal_url
+  datadelay: 5min
+
+  ## 0: Production mode - get data from the kostal pico 5.5 inverter
+  ## 1: Testcase for data simulation (no http request)
+  ## 3: Testcase for data simulation with github http request
+  simulatedata: "0"
+
+  ## logger settings
+  log_level: "DEBUG"
+  log_baud: "0"
+
+  ## device configuration
+  ## HARDWARE: HARDWARE: ESP32 240MHz, 520KB RAM, 4MB Flash
+  ## RAM:   [=         ]   8.2% (used 43740 bytes from 532480 bytes)
+  ## Flash: [======    ]  59.5% (used 1091733 bytes from 1835008 bytes)
+  board: "az-delivery-devkit-v4"
+
+## ------------------------
+## BOARD
+## ------------------------
+esp32:
+  board: ${board}
+
+## ------------------------
+## APPLICATION ESPHOME
+## ------------------------
+esphome:
+  name: "${device_name_short}"
+  comment: "${device_description}"
+  friendly_name: ${friendly_name}
+  # Automatically add the mac address to the name
+  # so you can use a single firmware for all devices
+  name_add_mac_suffix: false
+  build_path: ./build/${device_name_short}
+  ## larger stack size required with all registers enable_load_test
+  ## reduce registers or wait for integration of 2.0.0 arduinoespressif32
+  ## not yet working needs 2.0
+  platformio_options:
+    build_flags:
+      - '-DCONFIG_ARDUINO_LOOP_STACK_SIZE=32768'
+  project:
+    name: ${projectname}
+    version: ${appversion}
+  on_boot:
+    priority: -100.0
+    then:
+      - globals.set:
+          id: boot_counter
+          value: !lambda "return id(boot_counter)+=1;"
+      - logger.log:
+          level: WARN
+          format: "BOOTMESSAGE:${device_name_short} API is connected, Device ready!"
+      - component.update: bootcounter
+      - text_sensor.template.publish:
+          id: device_lastBoot_time
+          state: !lambda return id(time_sntp).now().strftime("%Y-%m-%dT%H:%M:%S %Z");
+  on_shutdown:
+    - priority: 700.0
+      then:
+        - logger.log:
+            level: WARN
+            format: "${device_name_short} is down!"
+
+## ------------------------
+## WIFI Settings
+## ------------------------
+wifi:
+  id: esp_wifi
+  networks:
+    - ssid: !secret ssid3_name
+      password: !secret ssid3_pswd
+      priority: 0
+    - ssid: !secret ssid1_name
+      password: !secret ssid1_pswd
+      priority: 1
+    - ssid: !secret ssid2_name
+      password: !secret ssid2_pswd
+      priority: 2
+  
+  # manual_ip:    
+  #   static_ip: 10.0.0.42 
+  #   # Set this to the IP address of the router. Often ends with .1
+  #   gateway: 10.0.0.1
+  #   # The subnet of the network. 255.255.255.0 works for most home networks.
+  #   subnet: 255.255.255.0    
+
+  domain: !secret domain
+  on_...:
+    if:
+      condition:
+        wifi.connected:
+      then:
+        - logger.log: WiFi is connected!
+
+## ------------------------
+## mDNS Component
+## ------------------------
+mdns:
+  # if mDNS is disabled, they will no longer be able to automatically find your devices.
+  disabled: false
+
+## ------------------------
+## Captive Portal Component
+## ------------------------
+captive_portal:
+
+## ------------------------
+## External Components
+## ------------------------
+external_components:
+  
+  # optinal: use local component from
+  # https://github.com/zdzichu6969/esphome-components
+  - source:
+      type: local
+      path: custom_components
+    components: [backup]
+
+  # optinal: use local component from
+  # https://github.com/TheStaticTurtle/esphome_syslog  
+  - source:
+      type: local
+      path: custom_components
+    components: [syslog]
+
+## ------------------------
+## syslog Component
+## ------------------------
+syslog:
+  ip_address: !secret syslog_server
+  port: !secret syslog_port
+  min_level: DEBUG
+  enable_logger: true
+
+## ------------------------
+## backup Component
+## ------------------------
+backup:
+  auth:
+    username: !secret web_username
+    password: !secret web_password
+  force_update: false
+
+## ------------------------
+## COMPONENT WEBSERVER
+## ------------------------
+web_server:
+  port: 80
+  version: 2
+  # set the url for the internal webserver
+  js_url: !secret webserver_jsurl
+
+## ------------------------
+## OTA Settings
+## ------------------------
+ota:
+  password: !secret ota_pswd
+  safe_mode: false
+  on_begin:
+    then:
+      - logger.log: 
+          format: "OTA START"
+          level: WARN
+  on_progress:
+    then:
+      - logger.log:
+          level: WARN 
+          format: "OTA progress %0.1f%%"
+          args: ["x"]
+  on_end:
+    then:
+      - logger.log: 
+          format: "OTA END"
+          level: WARN
+  on_error:
+    then:
+      - logger.log:
+          format: "OTA update error %d"
+          level: ERROR
+          args: ["x"]
+
+## ------------------------
+## Native API Component
+## ------------------------
+api:
+  id: espapi_kostal_piko
+  port: 6053
+  reboot_timeout: 0s
+  services:
+    - service: set_historydata
+      variables:
+        hour: float
+        yesterday: float
+        week: float
+        month: float
+        lastmonth: float
+        year: float
+      then:
+        - globals.set:
+            id: hour_value
+            value: !lambda return (hour);
+        - globals.set:
+            id: yesterday_value
+            value: !lambda return (yesterday);
+        - globals.set:
+            id: week_value
+            value: !lambda return (week);
+        - globals.set:
+            id: month_value
+            value: !lambda return (month);
+        - globals.set:
+            id: lastmonth_value
+            value: !lambda return (lastmonth);
+        - globals.set:
+            id: year_value
+            value: !lambda return (year);
+        - script.execute: updateHistorydata
+        - logger.log:
+            tag: "system"
+            format: "All new Values set: hour: %.3f, yesterday: %.3f, week: %.3f, month: %.3f, last month: %.3f, year: %.3f"
+            level: WARN
+            args:
+              [
+                "id(hour_value)",
+                "id(yesterday_value)",
+                "id(week_value)",
+                "id(month_value)",
+                "id(lastmonth_value)",
+                "id(year_value)",
+              ]
+
+## ------------------------
+# Global variables
+## ------------------------
+globals:
+
+  - id: boot_counter
+    type: int
+    restore_value: yes
+    initial_value: "0"
+
+  - id: pikostateon
+    type: std::string
+    restore_value: no
+    initial_value: '"Einspeisen MPP"'
+
+  - id: send_millisecond
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+  - id: last_value
+    type: float
+    restore_value: no
+    initial_value: "0.00"
+
+  - id: hour_value
+    type: float
+    restore_value: yes
+    initial_value: "0.00"
+
+  - id: yesterday_value
+    type: float
+    restore_value: yes
+    initial_value: "0.00"
+
+  - id: week_value
+    type: float
+    restore_value: yes
+    initial_value: "0.00"
+
+  - id: month_value
+    type: float
+    restore_value: yes
+    initial_value: "0.00"
+
+  - id: lastmonth_value
+    type: float
+    restore_value: yes
+    initial_value: "0.00"
+
+  - id: year_value
+    type: float
+    restore_value: yes
+    initial_value: "0.00"
+
+## ------------------------
+## Logger
+## ------------------------
+logger:
+  id: mylogger
+  level: ${log_level}
+  baud_rate: ${log_baud}
+  logs:
+    sensor: ERROR
+    internal_temperature: ERROR
+    develop: DEBUG # VERBOSE
+
+## ------------------------
+## SNTP Time server
+## ------------------------
+time:
+  - platform: sntp
+    id: time_sntp
+    timezone: Europe/Berlin
+    servers:
+      - fritz.box
+      - 0.at.pool.ntp.org
+      - 0.pool.ntp.org
+    on_time_sync:
+      # Components should trigger on_time_sync when they update the system clock.
+      then:
+        - logger.log:
+            level: WARN
+            tag: "system"
+            format: "Synchronized sntp clock"
+        - if:
+            condition:
+              lambda: 'return id(device_lastBoot_time).state == "";'
+            then:
+              - logger.log:
+                  level: WARN
+                  tag: "system"
+                  format: "Init last boot time and run data service" 
+              # update the boot timestamp     
+              - text_sensor.template.publish:
+                  id: device_lastBoot_time
+                  state: !lambda return id(time_sntp).now().strftime("%Y-%m-%dT%H:%M:%S %Z");
+              
+    on_time:
+      # reset hourly value
+      - seconds: 0
+        minutes: 0
+        then:
+          - globals.set:
+              id: hour_value
+              value: "0.00"
+          - lambda: id(kostal_hour).publish_state(id(hour_value));
+          - logger.log:
+              tag: "system"
+              level: INFO
+              format: "Reset value hour, starting next hour"
+
+      # reset daily value and set yesterday value
+      - seconds: 0
+        minutes: 59
+        hours: 23
+        then:
+          - lambda: |-
+              id(yesterday_value)=id(kostal_day).state;
+              id(kostal_yesterday).publish_state(id(yesterday_value));
+          - logger.log:
+              tag: "system"
+              level: INFO
+              format: "Set yesterday value and reset value daily, starting new day"
+
+      # reset weekly value, start new week
+      - seconds: 0
+        minutes: 59
+        hours: 23
+        days_of_week: MON
+        then:
+          - globals.set:
+              id: week_value
+              value: "0.00"
+          - lambda: id(kostal_week).publish_state(id(week_value));
+          - logger.log:
+              tag: "system"
+              level: INFO
+              format: "Reset value weekly, starting new week"
+
+      - seconds: 0
+        minutes: 59
+        hours: 23
+        days_of_month: 1
+        then:
+          - lambda: |-
+              if(id(kostal_month).state){
+                id(lastmonth_value)=id(kostal_month).state;
+              }
+          - lambda: id(kostal_lastmonth).publish_state(id(lastmonth_value));
+          - globals.set:
+              id: month_value
+              value: "0.00"
+          - lambda: id(kostal_month).publish_state(id(month_value));
+
+          - logger.log: Reset value monthly, starting new month
+
+      # new year, reset yearly value
+      - seconds: 0
+        minutes: 59
+        hours: 23
+        days_of_month: 1
+        months: JAN
+        then:
+          - globals.set:
+              id: year_value
+              value: "0.00"
+          - lambda: id(kostal_year).publish_state(id(year_value));
+          - logger.log:
+              tag: "system"
+              level: INFO
+              format: "Reset value yearly, starting new year"
+
+## ------------------------
+## SUN Component
+## ------------------------
+sun:
+  id: sunhome
+  latitude: !secret home_latitude
+  longitude: !secret home_longitude
+  on_sunrise:
+    - then:
+        - logger.log: Good morning!
+  on_sunset:
+    - then:
+        - logger.log: Good evening!
+
+## ------------------------
+## http_request Component
+## ------------------------
+http_request:
+  id: http_request_data
+  useragent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/113.0"
+  timeout: 20s
+
+
+## ------------------------
+## ALL SCRIPTS
+## ------------------------
+script:
+  # simple testcase for the kostal pico data w/o http connection
+  - id: simulateKostalData
+    then:
+      - logger.log:
+          tag: "system"
+          level: WARN
+          format: "Start Simulate Data"
+
+      - lambda: |-
+
+          // AC-Leistung_Aktuell simple simulation based on sun_elevation
+          float acLeistungAktuellFloat = 0.00;
+          if(id(sun_elevation).state>28 and id(sun_elevation).has_state()){
+            acLeistungAktuellFloat = (id(sun_elevation).state * 52.5) * 0.485;
+          }          
+          ESP_LOGD("develop", "AC-Leistung_Aktuell: %.2f", acLeistungAktuellFloat);
+          id(kostal_aktuell).publish_state(acLeistungAktuellFloat);
+
+          // AC_Leistung_Status
+          if(acLeistungAktuellFloat>0.00){
+            id(kostal_status).publish_state(id(pikostateon));          
+          }else{
+            id(kostal_status).publish_state("Offline");
+          }
+          
+          // Energie_Gesamtertrag
+          float energieGesamtertragFloat = 39000.00 + (acLeistungAktuellFloat * 0.001);
+          ESP_LOGD("develop", "AC-Energie_Gesamtertrag: %.2f", energieGesamtertragFloat);
+          id(kostal_total).publish_state(energieGesamtertragFloat);
+
+          // Energie_Tagesertrag_Aktuell  
+          if(id(kostal_day).has_state() ) {        
+            id(kostal_day).publish_state( id(kostal_day).state + (acLeistungAktuellFloat*0.001) );
+          }else{
+            id(kostal_day).publish_state( acLeistungAktuellFloat*0.001 );
+          }
+
+          // Ausgangsleistung_L1_Leistung
+          float pvGeneratorString1PowerFloat = 0.00;
+
+          // Ausgangsleistung_L2_Leistung
+          float pvGeneratorString2PowerFloat = 0.00;
+
+          if(id(time_sntp).now().hour<12.00 and acLeistungAktuellFloat>0.00){
+            pvGeneratorString1PowerFloat = acLeistungAktuellFloat;
+          }else{
+            pvGeneratorString2PowerFloat = acLeistungAktuellFloat;
+          }
+
+          ESP_LOGD("develop", "Ausgangsleistung_L1_Leistung: %.2f", pvGeneratorString1PowerFloat);          
+          id(kostal_l1_power).publish_state(pvGeneratorString1PowerFloat);
+          ESP_LOGD("develop", "Ausgangsleistung_L2_Leistung: %.2f", pvGeneratorString2PowerFloat);
+          id(kostal_l2_power).publish_state(pvGeneratorString2PowerFloat);          
+          id(kostal_l3_power).publish_state(0.00);
+
+          float pvPower = pvGeneratorString1PowerFloat+pvGeneratorString2PowerFloat;
+          ESP_LOGD("develop", "Total Power: Ost+West: %.2f", pvPower);
+
+          float powerRatioEast = 0.00;
+          float powerRatioWest = 0.00;
+
+          if(pvPower){
+            powerRatioEast = (pvGeneratorString1PowerFloat / pvPower) * 100;
+            powerRatioWest = (pvGeneratorString2PowerFloat / pvPower) * 100;
+          }
+          id(kostal_power_east).publish_state(powerRatioEast);
+          id(kostal_power_west).publish_state(powerRatioWest);
+          ESP_LOGD("develop", "PV Power ratio: Ost: %.2f, West: %.2f", powerRatioEast, powerRatioWest);
+
+          if(id(last_value) > 0.00 and id(kostal_day).state > 0.00){
+            float v = id(kostal_day).state - float(id(last_value));
+            id(hour_value)+=v;
+            id(week_value)+=v;
+            id(month_value)+=v;
+            id(year_value)+=v;
+          }
+
+          id(last_value) = id(kostal_day).state;
+
+      - script.execute: updateHistorydata
+      - script.wait: updateHistorydata
+
+      - text_sensor.template.publish:
+          id: kostal_datatime
+          state: !lambda return id(time_sntp).now().strftime("%Y-%m-%dT%H:%M:%S %Z");
+
+      - sensor.template.publish:
+          id: kostal_data_timeout
+          state: !lambda |-
+            int time_used = ( millis() - id(send_millisecond) );            
+            id(send_millisecond) = millis();
+            return float(time_used)/1000;
+
+      - logger.log:
+          tag: "system"
+          level: WARN
+          format: "End Simulate Data"
+
+  # get the kostal pico data (production mode) - get the data from the kostal pico inverter
+  - id: readKostalPicoData
+    then:
+      - logger.log:
+          tag: "system"
+          level: WARN
+          format: "Start get Data"
+
+      - http_request.get:
+          url: ${dataurl}
+          verify_ssl: false
+          on_response:
+            - then:
+                - logger.log:
+                    format: "Response status: %d, Duration: %u ms"
+                    tag: "develop"
+                    level: DEBUG
+                    args:
+                      - status_code
+                      - duration_ms
+            - then:
+                if:
+                  condition:
+                    lambda: return status_code == 200;
+                  then:
+                    - logger.log:
+                        format: "Response status: %d, Duration: %u ms"
+                        tag: "develop"
+                        level: DEBUG
+                        args:
+                          - status_code
+                          - duration_ms
+
+                    - lambda: |-
+
+                        // get the data from the http request
+                        std::string data = id(http_request_data).get_string();
+
+                        // AC-Leistung_Aktuell
+                        size_t pos1 = data.find("aktuell</td>");
+                        size_t pos2 = data.find("</td>", pos1 + 20);
+                        std::string acLeistungAktuell = data.substr(pos1 + 65, pos2 - pos1 - 65);
+                        float acLeistungAktuellFloat = std::stof(acLeistungAktuell);
+                        id(kostal_aktuell).publish_state(acLeistungAktuellFloat);
+                        ESP_LOGD("develop", "AC-Leistung_Aktuell: %.2f", acLeistungAktuellFloat);
+
+                        // AC_Leistung_Status
+                        pos1 = data.find("Status</td>");
+                        pos2 = data.find("</td>", pos1 + 20);
+                        std::string acLeistungStatus = data.substr(pos1 + 33, pos2 - pos1 - 33);
+                        id(kostal_status).publish_state(acLeistungStatus);
+                        ESP_LOGD("develop", "AC_Leistung_Status: %.2f", acLeistungStatus);
+
+                        // Energie_Gesamtertrag
+                        pos1 = data.find("Gesamtenergie</td>");
+                        pos2 = data.find("</td>", pos1 + 30);
+                        std::string energieGesamtertrag = data.substr(pos1 + 70, pos2 - pos1 - 70);
+                        float energieGesamtertragFloat = std::stof(energieGesamtertrag);
+                        id(kostal_total).publish_state(energieGesamtertragFloat);
+                        ESP_LOGD("develop", "Energie_Gesamtertrag: %.2f", energieGesamtertragFloat);
+
+                        // Energie_Tagesertrag_Aktuell
+                        pos1 = data.find("Tagesenergie</td>");
+                        pos2 = data.find("</td>", pos1 + 20);
+                        std::string energieTagesertragAktuell = data.substr(pos1 + 70, pos2 - pos1 - 70);
+                        float energieTagesertragAktuellFloat = std::stof(energieTagesertragAktuell);
+                        id(kostal_day).publish_state(energieTagesertragAktuellFloat);
+                        ESP_LOGD("develop", "Energie_Tagesertrag_Aktuell: %.2f", energieTagesertragAktuellFloat);
+
+                        // PV_Generator_String1_Spannung
+                        pos1 = data.find("Spannung</td>", pos2);
+                        pos2 = data.find("</td>", pos1 + 20);
+                        std::string s1Volt = data.substr(pos1 + 66, pos2 - pos1 - 66);
+                        float s1VoltFloat = std::stof(s1Volt);
+
+                        // Ausgangsleistung_L1_Spannung
+                        pos1 = data.find("Spannung</td>", pos2);
+                        pos2 = data.find("</td>", pos1 + 20);
+
+                        // PV_Generator_String1_Strom
+                        pos1 = data.find("Strom</td>", pos2);
+                        pos2 = data.find("</td>", pos1 + 20);
+                        std::string pvGeneratorString1Strom = data.substr(pos1 + 63, pos2 - pos1 - 63);
+                        float pvGeneratorString1StromFloat = std::stof(pvGeneratorString1Strom);
+                        ESP_LOGD("develop", "PV_Generator_String1_Strom: %.2f", pvGeneratorString1StromFloat);
+
+                        // Ausgangsleistung_L1_Leistung
+                        pos1 = data.find("Leistung</td>", pos2);
+                        pos2 = data.find("</td>", pos1 + 20);
+                        std::string pvGeneratorString1Power = data.substr(pos1 + 66, pos2 - pos1 - 66);
+                        float pvGeneratorString1PowerFloat = std::stof(pvGeneratorString1Power);
+                        id(kostal_l1_power).publish_state(pvGeneratorString1PowerFloat);
+                        ESP_LOGD("develop", "Ausgangsleistung_L1_Leistung: %.2f", pvGeneratorString1PowerFloat);
+
+                        // PV_Generator_String2_Spannung
+                        pos1 = data.find("Spannung</td>", pos2);
+                        pos2 = data.find("</td>", pos1 + 20);
+                        std::string s2Volt = data.substr(pos1 + 66, pos2 - pos1 - 66);
+                        float s2VoltFloat = std::stof(s2Volt);
+                        ESP_LOGD("develop", "PV_Generator_String2_Spannung: %.2f", s2VoltFloat);
+
+                        // Ausgangsleistung_L2_Spannung
+                        pos1 = data.find("Spannung</td>", pos2);
+                        pos2 = data.find("</td>", pos1 + 20);
+
+                        // PV_Generator_String2_Strom
+                        pos1 = data.find("Strom</td>", pos2);
+                        pos2 = data.find("</td>", pos1 + 20);
+                        std::string pvGeneratorString2Strom = data.substr(pos1 + 63, pos2 - pos1 - 63);
+                        float pvGeneratorString2StromFloat = std::stof(pvGeneratorString2Strom);
+                        ESP_LOGD("develop", "PV_Generator_String2_Strom: %.2f", pvGeneratorString2StromFloat);
+
+                        // Ausgangsleistung_L2_Leistung
+                        pos1 = data.find("Leistung</td>", pos2);
+                        pos2 = data.find("</td>", pos1 + 20);
+                        std::string pvGeneratorString2Power = data.substr(pos1 + 66, pos2 - pos1 - 66);
+                        float pvGeneratorString2PowerFloat = std::stof(pvGeneratorString2Power);
+                        id(kostal_l2_power).publish_state(pvGeneratorString2PowerFloat);
+                        ESP_LOGD("develop", "Ausgangsleistung_L2_Leistung: %.2f", kostal_l2_power);
+
+                        // PV_Generator_String3_Spannung
+                        pos1 = data.find("Spannung</td>", pos2);
+                        pos2 = data.find("</td>", pos1 + 20);
+
+                        // Ausgangsleistung_L3_Spannung
+                        pos1 = data.find("Spannung</td>", pos2);
+                        pos2 = data.find("</td>", pos1 + 20);
+
+                        // PV_Generator_String3_Strom
+                        pos1 = data.find("Strom</td>", pos2);
+                        pos2 = data.find("</td>", pos1 + 20);
+
+                        // Ausgangsleistung_L3_Leistung
+                        pos1 = data.find("Leistung</td>", pos2);
+                        pos2 = data.find("</td>", pos1 + 20);
+                        std::string pvGeneratorString3Power = data.substr(pos1 + 66, pos2 - pos1 - 66);
+                        float pvGeneratorString3PowerFloat = std::stof(pvGeneratorString3Power);
+                        id(kostal_l3_power).publish_state(pvGeneratorString3PowerFloat);
+                        ESP_LOGD("develop", "Ausgangsleistung_L3_Leistung: %.2f", pvGeneratorString3PowerFloat);
+
+                        // calc the power ratio east to west
+                        float pvPowerS1 = s1VoltFloat * pvGeneratorString1StromFloat;
+                        float pvPowerS2 = s2VoltFloat * pvGeneratorString2StromFloat;
+                        ESP_LOGD("develop", "PV Power: Ost: %.2f, West: %.2f", pvPowerS1, pvPowerS2);
+
+                        float pvPower = pvPowerS1+pvPowerS2;
+                        ESP_LOGD("develop", "Total Power: Ost+West: %.2f", pvPower);
+                        float powerRatioEast = 0.00;
+                        float powerRatioWest = 0.00; 
+                        if(pvPower){
+                          powerRatioEast = (pvPowerS1 / pvPower) * 100;
+                          powerRatioWest = (pvPowerS2 / pvPower) * 100;   
+                        }            
+                        id(kostal_power_east).publish_state(powerRatioEast);
+                        id(kostal_power_west).publish_state(powerRatioWest);
+                        ESP_LOGD("develop", "PV Power ratio: Ost: %.2f, West: %.2f", powerRatioEast, powerRatioWest);
+
+                        // update the history
+                        if(id(last_value) > 0.00 and energieTagesertragAktuellFloat > 0.00){
+                          float v = energieTagesertragAktuellFloat - float(id(last_value));
+                          id(hour_value)+=v;
+                          id(week_value)+=v;
+                          id(month_value)+=v;
+                          id(year_value)+=v;
+                        }
+                        ESP_LOGD("develop", "History last_value: %.2f", energieTagesertragAktuellFloat);
+                        id(last_value) = energieTagesertragAktuellFloat;
+
+                        data = "";
+
+                    - script.execute: updateHistorydata
+                    - script.wait: updateHistorydata
+
+                    - text_sensor.template.publish:
+                        id: kostal_datatime
+                        state: !lambda return id(time_sntp).now().strftime("%Y-%m-%dT%H:%M:%S %Z");
+
+                    - sensor.template.publish:
+                        id: kostal_data_timeout
+                        state: !lambda |-
+                          int time_used = ( millis() - id(send_millisecond) );            
+                          id(send_millisecond) = millis();
+                          return float(time_used)/1000;
+
+                    - logger.log:
+                        tag: "develop"
+                        level: WARN
+                        format: "End get Data"
+
+  # update all history data sensors based on the global vars
+  - id: updateHistorydata
+    then:
+      - logger.log:
+          tag: "develop"
+          level: DEBUG
+          format: "Update Historydata"
+      - lambda: |-
+          id(kostal_hour).publish_state( id(hour_value) );
+          id(kostal_yesterday).publish_state( id(yesterday_value) );
+          id(kostal_week).publish_state( id(week_value) );
+          id(kostal_month).publish_state( id(month_value) );
+          id(kostal_lastmonth).publish_state( id(lastmonth_value) );
+          id(kostal_year).publish_state( id(year_value) );
+
+## ------------------------
+## SWITCHES
+## ------------------------
+switch:
+  - platform: template
+    name: "Boot Counter Reset"
+    icon: mdi:lock-reset
+    turn_on_action:
+      then:
+        - lambda: id(boot_counter) = 0; id(bootcounter).publish_state(id(boot_counter));
+        - logger.log:
+            level: WARN
+            tag: "system"
+            format: "${device_name_short} reset boot counter o.k!"
+        - component.update: bootcounter
+
+  # reset all global vars
+  - platform: template
+    name: "Historydata reset values"
+    turn_on_action:
+      then:
+        - lambda: |-
+            id(last_value) = 0.00;            
+            id(boot_counter) = 0;
+            id(bootcounter).publish_state(id(boot_counter));
+            id(hour_value) = 0.00;          
+            id(yesterday_value) = 0.00;            
+            id(week_value) = 0.00;            
+            id(month_value) = 0.00;      
+            id(lastmonth_value) = 0.00;            
+            id(year_value) = 0.00;
+        - script.execute: updateHistorydata
+        - logger.log:
+            level: INFO
+            tag: "system"
+            format: "all values reset!"
+
+  - platform: restart
+    id: restart_device
+    name: Device restart
+    icon: mdi:restart
+
+  - platform: safe_mode
+    name: "Device restart Safe Mode"
+    icon: mdi:restart
+
+  - platform: factory_reset
+    name: Device restart factory defaults
+    icon: mdi:restart
+
+## ------------------------
+## BINARY SENSORS
+## ------------------------
+binary_sensor:
+  # Einspeisen MPP
+  - platform: template
+    name: "Energie Produktion"
+    icon: mdi:toggle-switch-variant-off
+    id: kostal_production_on
+    lambda: return id(kostal_status).state == id(pikostateon);
+
+## ------------------------
+## SENSORS
+## ------------------------
+sensor:
+  # aktuelle Leistung
+  # kostal_l1_power + kostal_l2_power + kostal_l3_power
+  - platform: template
+    name: "Leistung aktuell"
+    id: kostal_aktuell
+    icon: mdi:solar-power-variant
+    accuracy_decimals: 2
+    state_class: total_increasing
+    device_class: energy
+    unit_of_measurement: "W"
+
+  # Energie Produktion pro Stunde
+  - platform: template
+    name: "Energie Stunde"
+    id: kostal_hour
+    icon: mdi:solar-power
+    accuracy_decimals: 2
+    state_class: total_increasing
+    device_class: energy
+    unit_of_measurement: "kWh"
+
+  # Energie Produktion pro Tag
+  - platform: template
+    name: "Energie Tag"
+    id: kostal_day
+    icon: mdi:solar-power
+    accuracy_decimals: 2
+    state_class: total_increasing
+    device_class: energy
+    unit_of_measurement: "kWh"
+
+  # Energie Produktion voriger Tag
+  - platform: template
+    name: "Energie voriger Tag"
+    id: kostal_yesterday
+    icon: mdi:solar-power
+    accuracy_decimals: 2
+    state_class: total_increasing
+    device_class: energy
+    unit_of_measurement: "kWh"
+
+  # Energie Produktion aktuelle Wochen
+  - platform: template
+    name: "Energie Woche"
+    id: kostal_week
+    icon: mdi:solar-power
+    accuracy_decimals: 2
+    state_class: total_increasing
+    device_class: energy
+    unit_of_measurement: "kWh"
+
+  # Energie Produktion aktueller Monat
+  - platform: template
+    name: "Energie Monat"
+    id: kostal_month
+    icon: mdi:solar-power
+    accuracy_decimals: 2
+    state_class: total_increasing
+    device_class: energy
+    unit_of_measurement: "kWh"
+
+  # Energie Produktion voriger Monat
+  - platform: template
+    name: "Energie voriger Monat"
+    id: kostal_lastmonth
+    icon: mdi:solar-power
+    accuracy_decimals: 2
+    state_class: total_increasing
+    device_class: energy
+    unit_of_measurement: "kWh"
+
+  # Energie Produktion aktuelles Jahr
+  - platform: template
+    name: "Energie Jahr"
+    id: kostal_year
+    icon: mdi:solar-power
+    accuracy_decimals: 2
+    state_class: total_increasing
+    device_class: energy
+    unit_of_measurement: "kWh"
+
+  # Energie Produktion gesamt seit installation
+  - platform: template
+    name: "Energie Gesamt"
+    id: kostal_total
+    icon: mdi:solar-power
+    accuracy_decimals: 2
+    state_class: total_increasing
+    device_class: energy
+    unit_of_measurement: "kWh"
+
+  # Leistung Produktion Phase 1
+  - platform: template
+    name: "Energie L1"
+    id: kostal_l1_power
+    icon: mdi:solar-power
+    accuracy_decimals: 2
+    state_class: total_increasing
+    device_class: energy
+    unit_of_measurement: "W"
+
+  # Leistung Produktion Phase 2
+  - platform: template
+    name: "Energie L2"
+    id: kostal_l2_power
+    icon: mdi:solar-power
+    accuracy_decimals: 2
+    state_class: total_increasing
+    device_class: energy
+    unit_of_measurement: "W"
+
+  # Leistung Produktion Phase 3
+  - platform: template
+    name: "Energie L3"
+    id: kostal_l3_power
+    icon: mdi:solar-power
+    accuracy_decimals: 2
+    state_class: total_increasing
+    device_class: energy
+    unit_of_measurement: "W"
+
+  # Solar Panel Leistung (simple, just a testcase)
+  # better get the current power from solcast.com
+  # https://solcast.com/solar-radiation-map/europe
+  - platform: template
+    name: "Solar Panel Leistung"
+    id: kostal_solar_panel_power
+    icon: mdi:solar-power
+    accuracy_decimals: 2
+    state_class: measurement
+    device_class: energy
+    unit_of_measurement: "W"
+    lambda: |-
+       if(id(sun_elevation).has_state() and id(sun_elevation).state>1.00){
+        return ( (24.00*260.00*0.9) * (id(sun_elevation).state/100.00) ); 
+       }else{
+        return 0.00;
+       }
+
+  # theortischer Leistungsfakor = aktuelle Leistung / Sonnen Leistung
+  - platform: template
+    name: "Solar Leistungsfaktor"
+    id: kostal_solar_panel_faktor
+    icon: mdi:percent-outline
+    accuracy_decimals: 2
+    state_class: measurement
+    unit_of_measurement: "%"
+    lambda: |-
+       if(id(kostal_aktuell).has_state() and id(kostal_solar_panel_power).has_state() and id(kostal_solar_panel_power).has_state()>0.00){
+          return id(kostal_aktuell).state / id(kostal_solar_panel_power).state;
+       }else{
+          return 0.00;
+       }
+       
+  # Leistung Produktions Anteil Ost
+  - platform: template
+    name: "Energie Anteil Ost"
+    id: kostal_power_east
+    icon: mdi:home-percent-outline
+    accuracy_decimals: 2
+    state_class: measurement
+    unit_of_measurement: "%"
+
+  # Leistung Produktions Anteil Ost
+  - platform: template
+    name: "Energie Anteil West"
+    id: kostal_power_west
+    icon: mdi:home-percent-outline
+    accuracy_decimals: 2
+    state_class: measurement
+    unit_of_measurement: "%"
+
+  # aktuelle Sonnenhöhe
+  - platform: sun
+    name: Sonnehöhe
+    id: sun_elevation
+    type: elevation
+    update_interval: ${datadelay}
+    on_value:
+      then:
+        - logger.log:
+            level: WARN
+            format: "sun_elevation changed"
+        # get the data from the kostal pico inverter
+        # if the sun_elevation change.
+        - if:
+            condition:
+              lambda: "return ${simulatedata} == 1;"
+            then:
+              - script.execute: simulateKostalData
+              - script.wait: simulateKostalData
+            else:
+              - script.execute: readKostalPicoData
+              - script.wait: readKostalPicoData
+    
+  # aktuelle Sonnenrichtung
+  - platform: sun
+    name: Sonnenrichtung
+    id: sun_anzimuth
+    type: azimuth
+    update_interval: ${datadelay}
+
+  # Wifi quality RSSI (%)
+  - platform: wifi_signal
+    name: "Device WLAN Signal"
+    id: wifi_signal_db
+    update_interval: 60s
+    icon: mdi:wifi
+    filters:
+      - lambda: return min(max(2 * (x + 100.0), 0.0), 100.0);
+    entity_category: "diagnostic"
+    unit_of_measurement: "%"
+  
+  # Uptime device in hours
+  - platform: uptime
+    name: Device online seit
+    id: uptime_human
+    icon: mdi:clock-start
+    filters:
+      - lambda: return x / 3600;
+    unit_of_measurement: "h"
+    entity_category: "diagnostic"
+    state_class: "measurement"
+    accuracy_decimals: 2
+
+  # device internal temperature (only webview)
+  - platform: internal_temperature
+    name: Device Internal Temperature
+    id: device_internal_temperature
+    icon: mdi:thermometer-lines
+    state_class: "measurement"
+    update_interval: 60s
+    entity_category: "diagnostic"
+    disabled_by_default: true
+
+  # device boot counter by device boot
+  - platform: template
+    name: "Boot counter"
+    id: bootcounter
+    icon: mdi:counter
+    accuracy_decimals: 0
+    state_class: "measurement"
+    entity_category: "diagnostic"
+    lambda: return (id(boot_counter));
+    
+  # the current size of free heap memory.
+  - platform: template
+    name: Free Heap Min
+    lambda: return {static_cast<float>(esp_get_minimum_free_heap_size())};
+    unit_of_measurement: B
+    update_interval: 2s
+    entity_category: "diagnostic"
+
+  # Minimum free heap ever available 
+  - platform: template
+    name: Free Heap
+    lambda: return {static_cast<float>(esp_get_free_heap_size())};
+    unit_of_measurement: B
+    update_interval: 2s
+    entity_category: "diagnostic"
+
+  # service call delay
+  - platform: template
+    name: Kostal Daten Intervall
+    id: kostal_data_timeout
+    icon: mdi:clock-start
+    accuracy_decimals: 2
+    unit_of_measurement: "sec"
+    state_class: "measurement"
+    entity_category: "diagnostic"
+     
+## ------------------------
+## TEXT SENSORS
+## ------------------------
+text_sensor:
+
+  # Kostal status
+  - platform: template
+    name: "Kostal Pico Status"
+    disabled_by_default: true
+    icon: mdi:alarm-note
+    id: kostal_status
+
+  # Kostal Daten Zeitstempel
+  - platform: template
+    name: "Kostal Pico Timestamp"
+    disabled_by_default: true
+    id: kostal_datatime
+    icon: mdi:clock-start
+
+  # Zeit Sonnenaufgang
+  - platform: sun
+    name: Sonnenaufgang am
+    type: sunrise
+    update_interval: ${datadelay}
+
+  # Zeit Sonnenaufgang
+  - platform: sun
+    name: Sonnenuntergang am
+    type: sunset
+    update_interval: ${datadelay}
+
+  # Last boot timestamp (updated by device boot)
+  - platform: template
+    name: "Device Last Boot"
+    disabled_by_default: true
+    id: device_lastBoot_time
+    icon: mdi:clock-start
+    on_value:
+      then:
+        - logger.log:
+            level: DEBUG
+            format: "device_lastBoot_time changed"
+        # init, try to get the data      
+        - if:
+            condition:
+              lambda: "return ${simulatedata} == 1;"
+            then:
+              - script.execute: simulateKostalData
+              - script.wait: simulateKostalData
+            else:
+              - script.execute: readKostalPicoData
+              - script.wait: readKostalPicoData
+  
+  # optional device timestamp (only for webserver)
+  - platform: template
+    id: systime
+    name: Device Uhrzeit
+    disabled_by_default: true
+    icon: mdi:clock-start
+    lambda: return id(time_sntp).now().strftime("%Y-%m-%dT%H:%M:%S %Z");
+
+  # connected to ssid (only for webserver)
+  - platform: wifi_info
+    ssid:
+      name: Device WLAN SSID
+      id: wlan_ssid
+      disabled_by_default: true
+      icon: mdi:wifi-settings
