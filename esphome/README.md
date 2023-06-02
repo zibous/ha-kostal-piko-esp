@@ -1,7 +1,7 @@
 # KOSTAL PIKO 5.50 - ESPHome - ESP32 (v4) 
 
 [![License][license-shield]][license]
-[![ESP32 Release](https://img.shields.io/github/v/release/zibous/ha-watermeter.svg?style=flat-square)](https://github.com/zibous/ha-kostal-piko-esp/releases)
+[![ESP32 Release](https://img.shields.io/github/v/release/zibous/ha-kostal-piko-esp.svg?style=flat-square)](https://github.com/zibous/ha-kostal-piko-esp/releases)
 [![ESPHome release][esphome-release-shield]][esphome-release]
 [![Open in Visual Studio Code][open-in-vscode-shield]][open-in-vscode]
 [![Support author][donate-me-shield]][donate-me]
