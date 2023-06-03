@@ -1,6 +1,8 @@
 ## ---------------------------------------------------
 ##  PIKO KOSTAL Dataservice
-## HARDWARE: HARDWARE: ESP32 240MHz, 520KB RAM, 4MB Flash
+##
+##  HARDWARE: HARDWARE: ESP32 240MHz, 520KB RAM, 4MB Flash
+##
 ##  Get the data from the KOSTAL Solar Electric Pico 5.5
 ##
 ## ---------------------------------------------------
@@ -16,7 +18,10 @@ substitutions:
 
   ## all for the data service
   dataurl: !secret kostal_url
-  datatesturl: !secret kostal_testurl
+
+  ## dataurl: !secret kostal_testurl2
+  datatesturl: !secret kostal_testurl1
+
   datadelay: 5min
   ## 0: Production mode - get data from the kostal pico 5.5 inverter
   ## 1: Testcase for data simulation (no http request)
@@ -24,8 +29,8 @@ substitutions:
   simulatedata: "0"
 
   ## logger settings
-  log_level: "DEBUG"
-  log_baud: "0"
+  log_level: "VERBOSE"  # use WARN for production mode to save memory.
+  log_baud: "115200"    # use 0 to disable serial UART port logging.
 
   ## device configuration
   ## HARDWARE: HARDWARE: ESP32 240MHz, 520KB RAM, 4MB Flash
@@ -38,6 +43,10 @@ substitutions:
 ## ------------------------
 esp32:
   board: ${board}
+
+# Customize the frequency in which data is flushed to the flash.
+preferences:
+  flash_write_interval: 10min
 
 ## ------------------------
 ## APPLICATION ESPHOME
@@ -60,7 +69,7 @@ esphome:
     name: ${projectname}
     version: ${appversion}
   on_boot:
-    priority: -100.0
+    # priority: -100.0
     then:
       - globals.set:
           id: boot_counter
@@ -69,11 +78,11 @@ esphome:
           level: WARN
           format: "BOOTMESSAGE:${device_name_short} API is connected, Device ready!"
       - component.update: bootcounter
-      - text_sensor.template.publish:
-          id: device_lastBoot_time
-          state: !lambda return id(time_sntp).now().strftime("%Y-%m-%dT%H:%M:%S %Z");
+      # - text_sensor.template.publish:
+      #     id: device_lastBoot_time
+      #     state: !lambda return id(time_sntp).now().strftime("%Y-%m-%dT%H:%M:%S %Z");
   on_shutdown:
-    - priority: 700.0
+      # - priority: 700.0
       then:
         - logger.log:
             level: WARN
@@ -94,14 +103,11 @@ wifi:
     - ssid: !secret ssid2_name
       password: !secret ssid2_pswd
       priority: 2
-
   # manual_ip:
-  #   static_ip: 10.0.0.42
-  #   # Set this to the IP address of the router. Often ends with .1
-  #   gateway: 10.0.0.1
-  #   # The subnet of the network. 255.255.255.0 works for most home networks.
+  #   static_ip: 10.1.1.1
+  #   gateway: 10.1.1.254
   #   subnet: 255.255.255.0
-
+  #   dns1: 10.1.1.254
   domain: !secret domain
 
 ## ------------------------
@@ -252,21 +258,6 @@ globals:
     restore_value: yes
     initial_value: "0"
 
-  - id: pikostateon
-    type: std::string
-    restore_value: no
-    initial_value: '"Einspeisen MPP"'
-
-  - id: send_millisecond
-    type: int
-    restore_value: false
-    initial_value: '0'
-
-  - id: last_value
-    type: float
-    restore_value: no
-    initial_value: "0.00"
-
   - id: hour_value
     type: float
     restore_value: yes
@@ -297,6 +288,21 @@ globals:
     restore_value: yes
     initial_value: "0.00"
 
+  - id: pikostateon
+    type: std::string
+    restore_value: no
+    initial_value: '"Einspeisen MPP"'
+
+  - id: send_millisecond
+    type: int
+    restore_value: no
+    initial_value: '0'
+
+  - id: last_value
+    type: float
+    restore_value: no
+    initial_value: "0.00"
+
 ## ------------------------
 ## COMPONENT Logger
 ## ------------------------
@@ -308,6 +314,7 @@ logger:
     sensor: ERROR
     internal_temperature: ERROR
     develop: DEBUG # VERBOSE
+    json: ERROR
 
 ## ------------------------
 ## COMPONENT Time server
@@ -317,9 +324,10 @@ time:
     id: time_sntp
     timezone: Europe/Berlin
     servers:
-      - fritz.box
       - 0.at.pool.ntp.org
       - 0.pool.ntp.org
+      - 1.pool.ntp.org
+
     on_time_sync:
       # Components should trigger on_time_sync when they update the system clock.
       then:
@@ -435,13 +443,32 @@ sun:
 http_request:
   id: http_request_data
   useragent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/113.0"
-  timeout: 20s
-
+  # timeout (Optional, Time): Timeout for request. Defaults to 5s.
 
 ## ------------------------
 ## ALL SCRIPTS
 ## ------------------------
 script:
+
+  # save the global vars
+  - id: script_save_changes
+    mode: restart
+    then:
+      - delay: 3s
+      - lambda: global_preferences->sync();
+
+  # - id: showMemoryusage
+  #   then:
+  #     - logger.log:
+  #         format: "Memory FreeHeap:%f, HeapFrag:%f, MaxFree:%f, Sketch:%f, Sketchfree:%f"
+  #         tag: "develop"
+  #         level: DEBUG
+  #         args:
+  #            - ESP.getFreeHeap()
+  #            - ESP.getHeapFragmentation()
+  #            - ESP.getMaxFreeBlockSize()
+  #            - ESP.getSketchSize()
+  #            - ESP.getFreeSketchSpace()
 
   # simple check for simulate data source
   - id: getGitubData
@@ -569,6 +596,7 @@ script:
   # get the kostal pico data (production mode) - get the data from the kostal pico inverter
   - id: readKostalPicoData
     then:
+
       - logger.log:
           tag: "system"
           level: WARN
@@ -605,15 +633,22 @@ script:
                         // get the data from the http request
                         std::string data = id(http_request_data).get_string();
 
+                        id(kostal_webinterface_status).publish_state("Decode Data");
+
                         // kostal_aktuell: AC-Leistung_Aktuell Watt
                         size_t pos1 = data.find("aktuell</td>");
                         size_t pos2 = data.find("</td>", pos1 + 20);
                         std::string acLeistungAktuell = data.substr(pos1 + 65, pos2 - pos1 - 65);
-                        float acLeistungAktuellFloat = std::stof(acLeistungAktuell);
+                        float acLeistungAktuellFloat = 0.00;
+                        if(acLeistungAktuell == "x x x&nbsp"){
+                           ESP_LOGW("kostal", "Kostal is OFFLINE, AC-Leistung_Aktuell: %.2f", acLeistungAktuellFloat);
+                        }else{
+                          acLeistungAktuellFloat = std::stof(acLeistungAktuell);
+                        }
                         id(kostal_aktuell).publish_state(acLeistungAktuellFloat);
                         ESP_LOGD("develop", "AC-Leistung_Aktuell: %.2f", acLeistungAktuellFloat);
 
-                        // kostal_status: AC_Leistung_Status
+                        // kostal_status: AC_Leistung_Status = Einspeisen MPP || Aus
                         pos1 = data.find("Status</td>");
                         pos2 = data.find("</td>", pos1 + 20);
                         std::string acLeistungStatus = data.substr(pos1 + 33, pos2 - pos1 - 33);
@@ -728,6 +763,7 @@ script:
 
                         } else {
 
+                          // Kostal piko 5.5 inverter is offline
                           id(kostal_l1_power).publish_state(0.00);
                           id(kostal_l2_power).publish_state(0.00);
                           id(kostal_l3_power).publish_state(0.00);
@@ -751,24 +787,46 @@ script:
                         // try to clean the memory ??
                         data = "";
 
-                    - script.execute: updateHistorydata
-                    - script.wait: updateHistorydata
-
-                    - text_sensor.template.publish:
-                        id: kostal_datatime
-                        state: !lambda return id(time_sntp).now().strftime("%Y-%m-%dT%H:%M:%S %Z");
-
-                    - sensor.template.publish:
-                        id: kostal_data_timeout
-                        state: !lambda |-
-                          int time_used = ( millis() - id(send_millisecond) );
-                          id(send_millisecond) = millis();
-                          return float(time_used)/1000;
+                        // update the state info
+                        id(kostal_webinterface_status).publish_state("Ready");
+                        id(kostal_webinterface_ready).publish_state(true);
 
                     - logger.log:
                         tag: "develop"
                         level: WARN
                         format: "End get Data"
+
+                    # - script.execute: script_save_changes
+
+                  else:
+
+                    - logger.log:
+                        tag: "system"
+                        level: ERROR
+                        format: "Kostal Webservice fatal Error"
+                    - lambda: |-
+                        // update the state info
+                        id(kostal_status).publish_state("Aus");
+                        id(kostal_webinterface_status).publish_state("Error");
+                        id(kostal_webinterface_ready).publish_state(false);
+
+            - then:
+
+                - script.execute: updateHistorydata
+                - script.wait: updateHistorydata
+
+                - text_sensor.template.publish:
+                    id: kostal_datatime
+                    state: !lambda return id(time_sntp).now().strftime("%Y-%m-%dT%H:%M:%S %Z");
+
+                - sensor.template.publish:
+                    id: kostal_data_timeout
+                    state: !lambda |-
+                      int time_used = ( millis() - id(send_millisecond) );
+                      id(send_millisecond) = millis();
+                      return float(time_used)/1000;
+
+
 
   # update all history data sensors based on the global vars
   - id: updateHistorydata
@@ -845,6 +903,12 @@ binary_sensor:
     icon: mdi:toggle-switch-variant-off
     id: kostal_production_on
     lambda: return id(kostal_status).has_state() and id(kostal_status).state == id(pikostateon);
+
+  # Webinterface Kostal Piko ready
+  - platform: template
+    name: "Kostal Pico Status"
+    icon: mdi:toggle-switch-variant-off
+    id: kostal_webinterface_ready
 
 ## ------------------------
 ## SENSORS
@@ -998,7 +1062,7 @@ sensor:
     state_class: measurement
     unit_of_measurement: "%"
     lambda: |-
-       if(id(kostal_aktuell).has_state() and id(kostal_solar_panel_power).has_state() and id(kostal_solar_panel_power).has_state()>0.00){
+       if(id(kostal_aktuell).has_state() and id(kostal_solar_panel_power).has_state() and id(kostal_solar_panel_power).state>0.00){
           return id(kostal_aktuell).state / id(kostal_solar_panel_power).state;
        }else{
           return 0.00;
@@ -1023,6 +1087,7 @@ sensor:
     unit_of_measurement: "%"
 
   # aktuelle Sonnenhöhe
+  # default: updates based on the datadelay settings
   - platform: sun
     name: Sonnehöhe
     id: sun_elevation
@@ -1133,6 +1198,12 @@ text_sensor:
     icon: mdi:alarm-note
     id: kostal_status
 
+  # Kostal webinterface status (updated by script)
+  - platform: template
+    name: "Kostal Pico Verbindung"
+    id: kostal_webinterface_status
+    icon: mdi:alarm-note
+
   # Kostal Daten Zeitstempel (updated by script)
   - platform: template
     name: "Kostal Pico Timestamp"
@@ -1175,6 +1246,7 @@ text_sensor:
               - script.wait: simulateKostalData
 
   # optional device timestamp (only for webserver)
+  # default: updates every minute (60s)
   - platform: template
     id: systime
     name: Device Uhrzeit
@@ -1189,3 +1261,10 @@ text_sensor:
       id: wlan_ssid
       disabled_by_default: true
       icon: mdi:wifi-settings
+
+  # installed esphome version
+  - platform: version
+    name: "ESPHome Version"
+    hide_timestamp: true
+    disabled_by_default: true
+    icon: mdi:information-box-outline

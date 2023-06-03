@@ -48,6 +48,8 @@ data:
   year: 12.3
 ```
 
+<br>
+
 ____
 
 ### Used components
@@ -58,6 +60,5 @@ ____
  - optional syslog (TheStaticTurtle)
    <https://github.com/TheStaticTurtle/esphome_syslog>
 
-<br>
 
 
