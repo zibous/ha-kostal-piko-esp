@@ -19,13 +19,34 @@
 [donate-me-shield]: https://img.shields.io/static/v1?label=+&color=orange&message=Buy+me+a+coffee
 [donate-me]: https://www.buymeacoff.ee/zibous
 
-
-
+The ESPHome application loads the data from the Kostal PIKO 5.5 inverter at cyclic intervals, determines the characteristic values and calculates the historical data. The data are transferred via the Homeassistant API interface.
 
 ### Requirements
-- ESPHOME Docker v2023.5.0-dev
-- ESP32 240MHz, 520KB RAM, 4MB Flash (ESP32 AZ-DELIVERY-DEVKIT-V4)
-- ESPHOME Configuration
+- **ESPHOME** on Docker v2023.5.0-dev
+- **ESP32** 240MHz, 520KB RAM, 4MB Flash (ESP32 AZ-DELIVERY-DEVKIT-V4)
+  <img src="../docs/esp32_pinlayout.png">
+- **ESPHOME** Configuration<br>
+  [![](https://img.shields.io/badge/HA_KOSTAL_PICO_ESP.yaml-orange?style=for-the-badge)](https://github.com/zibous/ha-kostal-piko-esp/blob/main/esphome/config/kostal-piko.yaml)
+<br>
+
+## Results
+
+<img src="../docs/esp-appdata.png">
+
+### Update Values with HA Service
+
+With the service development tool you can call every available service in Home Assistant. You can use the following service to reset the history values:
+
+```yaml
+service: esphome.kostal_piko_set_historydata
+data:
+  hour: 12.3
+  yesterday: 12.3
+  week: 12.3
+  month: 12.3
+  lastmonth: 12.3
+  year: 12.3
+```
 
 ____
 
@@ -38,19 +59,5 @@ ____
    <https://github.com/TheStaticTurtle/esphome_syslog>
 
 <br>
-
-
-### ESPHome-Flasher
-ESPHome-Flasher is a utility app for the ESPHome framework and is designed to make flashing ESPs with ESPHome as simple as possible by:
-
-    Having pre-built binaries for most operating systems.
-    Hiding all non-essential options for flashing. All necessary options for flashing (bootloader, flash mode) are automatically extracted from the binary.
-
-This project was originally intended to be a simple command-line tool, but then I decided that a GUI would be nice. As I don't like writing graphical front end code, the GUI largely is based on the NodeMCU PyFlasher project.
-[Self-contained NodeMCU flasher with GUI based on esptool.py and wxPython](https://github.com/marcelstoer/nodemcu-pyflasher)
-
-
-The flashing process is done using the esptool library by espressif.
-[esphome-flasher, a tool to flash ESPs over USB](https://github.com/esphome/esphome-flasher)
 
 
