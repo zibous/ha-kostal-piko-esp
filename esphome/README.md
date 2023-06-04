@@ -33,6 +33,10 @@ The ESPHome application loads the data from the Kostal PIKO 5.5 inverter at cycl
 
 <img src="../docs/esp-appdata.png">
 
+## Homeassistant
+
+<img src="../docs/ha-device.png">
+
 ### Update Values with HA Service
 
 With the service development tool you can call every available service in Home Assistant. You can use the following service to reset the history values:
