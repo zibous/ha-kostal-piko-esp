@@ -22,7 +22,7 @@ substitutions:
   datadelay: 5min
 
   ## logger settings
-  log_level: "WARN" # use WARN for production mode to save memory.
+  log_level: "VERBOSE" # use WARN for production mode to save memory.
   log_baud: "0" # use 115200 to eable serial UART port logging.
 
   ## device configuration
@@ -53,10 +53,11 @@ esphome:
   name_add_mac_suffix: false
   build_path: ./build/${device_name_short}
   # additiona compile otions
+  # see: https://docs.platformio.org/en/stable/boards/espressif32/az-delivery-devkit-v4.html
   platformio_options:
-    platform: espressif32
-    board: az-delivery-devkit-v4
+    platform: espressif32    
     board_build.mcu: esp32
+    board: az-delivery-devkit-v4
     board_build.f_cpu: 240000000L
     ## larger stack size required with all registers enable_load_test
     build_flags:
@@ -133,7 +134,7 @@ external_components:
 syslog:
   ip_address: !secret syslog_server
   port: !secret syslog_port
-  min_level: DEBUG
+  min_level: ${log_level}
   enable_logger: true
 
 ## ------------------------
@@ -221,6 +222,7 @@ api:
             id: year_value
             value: !lambda return (year);
         - script.execute: updateHistorydata
+        - script.wait: updateHistorydata
         - logger.log:
             tag: "system"
             format: "All new Values set: hour: %.3f, yesterday: %.3f, week: %.3f, month: %.3f, last month: %.3f, year: %.3f"
@@ -239,11 +241,13 @@ api:
 # Global variables
 ## ------------------------
 globals:
+  
   - id: boot_counter
     type: int
     restore_value: yes
     initial_value: "0"
 
+  # history data
   - id: hour_value
     type: float
     restore_value: yes
@@ -274,6 +278,17 @@ globals:
     restore_value: yes
     initial_value: "0.00"
 
+  - id: last_value
+    type: float
+    restore_value: no
+    initial_value: "0.00"
+
+  # piko inverter data
+  - id: kwhpeak
+    type: float
+    restore_value: no
+    initial_value: "6240.00"
+
   - id: pikostateon
     type: std::string
     restore_value: no
@@ -284,10 +299,10 @@ globals:
     restore_value: no
     initial_value: "0"
 
-  - id: last_value
-    type: float
+  - id: sunon  
+    type: int
     restore_value: no
-    initial_value: "0.00"
+    initial_value: "1"  
 
 ## ------------------------
 ## COMPONENT Logger
@@ -298,8 +313,10 @@ logger:
   baud_rate: ${log_baud}
   logs:
     sensor: ERROR
+    text_sensor: ERROR
     internal_temperature: ERROR    
     json: ERROR
+    developer: DEBUG
 
 ## ------------------------
 ## COMPONENT Time server
@@ -309,10 +326,10 @@ time:
     id: time_sntp
     timezone: Europe/Berlin
     servers:
-      - 0.at.pool.ntp.org
-      - 0.pool.ntp.org
-      - 1.pool.ntp.org
-
+       - !secret local_sntp
+       - 0.pool.ntp.org
+       - 1.pool.ntp.org
+    
     on_time_sync:
       # Components should trigger on_time_sync when they update the system clock.
       then:
@@ -417,10 +434,22 @@ sun:
   longitude: !secret home_longitude
   on_sunrise:
     - then:
-        - logger.log: Good morning!
+        - logger.log:
+            tag: "system"
+            level: INFO
+            format: "Sun is now rise"
+        - globals.set:
+            id: sunon
+            value: "1"
   on_sunset:
     - then:
-        - logger.log: Good evening!
+        - logger.log:
+            tag: "system"
+            level: INFO
+            format: "Sun is now down"
+        - globals.set:
+            id: sunon
+            value: "0"
 
 ## ------------------------
 ## COMPONENT http_request
@@ -429,19 +458,31 @@ http_request:
   id: http_request_data
   useragent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/113.0"
   # timeout (Optional, Time): Timeout for request. Defaults to 5s.
+  # timeout: 500ms
+
+## ------------------------
+## COMPONENT INTERVALL
+## ------------------------
+interval:
+  - interval: ${datadelay}
+    then:      
+      # get the data from the kostal pico inverter
+      - script.execute: readKostalPicoData
+      - script.wait: readKostalPicoData
 
 ## ------------------------
 ## ALL SCRIPTS
 ## ------------------------
 script:
+
   # get the kostal pico data (production mode) - get the data from the kostal pico inverter
   - id: readKostalPicoData
     then:
       - logger.log:
           tag: "system"
           level: WARN
-          format: "Start get Data"
-
+          format: "Start get Data: ${dataurl}"
+          
       - http_request.get:
           url: ${dataurl}
           verify_ssl: false
@@ -472,169 +513,183 @@ script:
 
                         // get the data from the http request
                         std::string data = id(http_request_data).get_string();
+                        
+                        if( !data.empty() ) {
 
-                        id(kostal_webinterface_status).publish_state("Decode Data");
+                            id(sysfreemapmin).update();
+                            id(sysfreeheap).update();
 
-                        // kostal_aktuell: AC-Leistung_Aktuell Watt
-                        size_t pos1 = data.find("aktuell</td>");
-                        size_t pos2 = data.find("</td>", pos1 + 20);
-                        std::string acLeistungAktuell = data.substr(pos1 + 65, pos2 - pos1 - 65);
-                        float acLeistungAktuellFloat = 0.00;
-                        if(acLeistungAktuell == "x x x&nbsp"){
-                           ESP_LOGW("kostal", "Kostal is OFFLINE, AC-Leistung_Aktuell: %.2f", acLeistungAktuellFloat);
-                        }else{
-                          acLeistungAktuellFloat = std::stof(acLeistungAktuell);
-                        }
-                        id(kostal_aktuell).publish_state(acLeistungAktuellFloat);
-                        ESP_LOGD("develop", "AC-Leistung_Aktuell: %.2f", acLeistungAktuellFloat);
+                            id(kostal_webinterface_status).publish_state("Decode Data");
 
-                        // kostal_status: AC_Leistung_Status = Einspeisen MPP || Aus
-                        pos1 = data.find("Status</td>");
-                        pos2 = data.find("</td>", pos1 + 20);
-                        std::string acLeistungStatus = data.substr(pos1 + 33, pos2 - pos1 - 33);
-                        id(kostal_status).publish_state(acLeistungStatus);
-                        ESP_LOGD("develop", "AC_Leistung_Status: %.2f", acLeistungStatus);
-
-                        // kostal_total: Energie_Gesamtertrag kWh
-                        pos1 = data.find("Gesamtenergie</td>");
-                        pos2 = data.find("</td>", pos1 + 30);
-                        std::string energieGesamtertrag = data.substr(pos1 + 70, pos2 - pos1 - 70);
-                        float energieGesamtertragFloat = std::stof(energieGesamtertrag);
-                        id(kostal_total).publish_state(energieGesamtertragFloat);
-                        ESP_LOGD("develop", "Energie_Gesamtertrag: %.2f", energieGesamtertragFloat);
-
-                        // kostal_day: Energie_Tagesertrag_Aktuell kWh
-                        pos1 = data.find("Tagesenergie</td>");
-                        pos2 = data.find("</td>", pos1 + 20);
-                        std::string energieTagesertragAktuell = data.substr(pos1 + 70, pos2 - pos1 - 70);
-                        float energieTagesertragAktuellFloat = std::stof(energieTagesertragAktuell);
-
-                        // kostal_day: reset the kostal_day after midnight
-                        if(id(time_sntp).now().hour>0.00 and acLeistungAktuellFloat==0.00){
-                           energieTagesertragAktuellFloat = 0.00;
-                        }
-                        id(kostal_day).publish_state(energieTagesertragAktuellFloat);
-                        ESP_LOGD("develop", "Energie_Tagesertrag_Aktuell: %.2f", energieTagesertragAktuellFloat);
-
-                        if(id(kostal_aktuell).has_state() and id(kostal_aktuell).state > 0.00){
-
-                            // PV_Generator_String1_Spannung Volt
-                            pos1 = data.find("Spannung</td>", pos2);
-                            pos2 = data.find("</td>", pos1 + 20);
-                            std::string s1Volt = data.substr(pos1 + 66, pos2 - pos1 - 66);
-                            float s1VoltFloat = std::stof(s1Volt);
-
-                            // Ausgangsleistung_L1_Spannung Volt
-                            pos1 = data.find("Spannung</td>", pos2);
-                            pos2 = data.find("</td>", pos1 + 20);
-
-                            // PV_Generator_String1_Strom Ampere
-                            pos1 = data.find("Strom</td>", pos2);
-                            pos2 = data.find("</td>", pos1 + 20);
-                            std::string pvGeneratorString1Strom = data.substr(pos1 + 63, pos2 - pos1 - 63);
-                            float pvGeneratorString1StromFloat = std::stof(pvGeneratorString1Strom);
-                            ESP_LOGD("develop", "PV_Generator_String1_Strom: %.2f", pvGeneratorString1StromFloat);
-
-                            // kostal_l1_power: Ausgangsleistung_L1_Leistung Watt
-                            pos1 = data.find("Leistung</td>", pos2);
-                            pos2 = data.find("</td>", pos1 + 20);
-                            std::string pvGeneratorString1Power = data.substr(pos1 + 66, pos2 - pos1 - 66);
-                            float pvGeneratorString1PowerFloat = std::stof(pvGeneratorString1Power);
-                            id(kostal_l1_power).publish_state(pvGeneratorString1PowerFloat);
-                            ESP_LOGD("develop", "Ausgangsleistung_L1_Leistung: %.2f", pvGeneratorString1PowerFloat);
-
-                            // PV_Generator_String2_Spannung Volt
-                            pos1 = data.find("Spannung</td>", pos2);
-                            pos2 = data.find("</td>", pos1 + 20);
-                            std::string s2Volt = data.substr(pos1 + 66, pos2 - pos1 - 66);
-                            float s2VoltFloat = std::stof(s2Volt);
-                            ESP_LOGD("develop", "PV_Generator_String2_Spannung: %.2f", s2VoltFloat);
-
-                            // Ausgangsleistung_L2_Spannung Volt
-                            pos1 = data.find("Spannung</td>", pos2);
-                            pos2 = data.find("</td>", pos1 + 20);
-
-                            // PV_Generator_String2_Strom Ampere
-                            pos1 = data.find("Strom</td>", pos2);
-                            pos2 = data.find("</td>", pos1 + 20);
-                            std::string pvGeneratorString2Strom = data.substr(pos1 + 63, pos2 - pos1 - 63);
-                            float pvGeneratorString2StromFloat = std::stof(pvGeneratorString2Strom);
-                            ESP_LOGD("develop", "PV_Generator_String2_Strom: %.2f", pvGeneratorString2StromFloat);
-
-                            // kostal_l2_power: Ausgangsleistung_L2_Leistung Watt
-                            pos1 = data.find("Leistung</td>", pos2);
-                            pos2 = data.find("</td>", pos1 + 20);
-                            std::string pvGeneratorString2Power = data.substr(pos1 + 66, pos2 - pos1 - 66);
-                            float pvGeneratorString2PowerFloat = std::stof(pvGeneratorString2Power);
-                            id(kostal_l2_power).publish_state(pvGeneratorString2PowerFloat);
-                            ESP_LOGD("develop", "Ausgangsleistung_L2_Leistung: %.2f", kostal_l2_power);
-
-                            // PV_Generator_String3_Spannung Volt
-                            pos1 = data.find("Spannung</td>", pos2);
-                            pos2 = data.find("</td>", pos1 + 20);
-
-                            // Ausgangsleistung_L3_Spannung Volt
-                            pos1 = data.find("Spannung</td>", pos2);
-                            pos2 = data.find("</td>", pos1 + 20);
-
-                            // PV_Generator_String3_Strom Ampere
-                            pos1 = data.find("Strom</td>", pos2);
-                            pos2 = data.find("</td>", pos1 + 20);
-
-                            // kostal_l3_power: Ausgangsleistung_L3_Leistung Watt
-                            pos1 = data.find("Leistung</td>", pos2);
-                            pos2 = data.find("</td>", pos1 + 20);
-                            std::string pvGeneratorString3Power = data.substr(pos1 + 66, pos2 - pos1 - 66);
-                            float pvGeneratorString3PowerFloat = std::stof(pvGeneratorString3Power);
-                            id(kostal_l3_power).publish_state(pvGeneratorString3PowerFloat);
-                            ESP_LOGD("develop", "Ausgangsleistung_L3_Leistung: %.2f", pvGeneratorString3PowerFloat);
-
-                            // kostal_power_east / kostal_power_west : calc the power ratio east to west
-                            float pvPowerS1 = s1VoltFloat * pvGeneratorString1StromFloat;
-                            float pvPowerS2 = s2VoltFloat * pvGeneratorString2StromFloat;
-                            ESP_LOGD("develop", "PV Power: Ost: %.2f, West: %.2f", pvPowerS1, pvPowerS2);
-
-                            float pvPower = pvPowerS1+pvPowerS2;
-                            ESP_LOGD("develop", "Total Power: Ost+West: %.2f", pvPower);
-                            float powerRatioEast = 0.00;
-                            float powerRatioWest = 0.00;
-                            if(pvPower){
-                              powerRatioEast = (pvPowerS1 / pvPower) * 100;
-                              powerRatioWest = (pvPowerS2 / pvPower) * 100;
+                            // kostal_aktuell: AC-Leistung_Aktuell Watt
+                            size_t pos1 = data.find("aktuell</td>");
+                            size_t pos2 = data.find("</td>", pos1 + 20);
+                            std::string acLeistungAktuell = data.substr(pos1 + 65, pos2 - pos1 - 65);
+                            float acLeistungAktuellFloat = 0.00;
+                            if(acLeistungAktuell == "x x x&nbsp"){
+                              ESP_LOGW("kostal", "Kostal is OFFLINE, AC-Leistung_Aktuell: %.2f", acLeistungAktuellFloat);
+                            }else{
+                              acLeistungAktuellFloat = std::stof(acLeistungAktuell);
                             }
-                            id(kostal_power_east).publish_state(powerRatioEast);
-                            id(kostal_power_west).publish_state(powerRatioWest);
-                            ESP_LOGD("develop", "PV Power ratio: Ost: %.2f, West: %.2f", powerRatioEast, powerRatioWest);
+                            id(kostal_aktuell).publish_state(acLeistungAktuellFloat);
+                            ESP_LOGD("develop", "AC-Leistung_Aktuell: %.2f", acLeistungAktuellFloat);
 
-                        } else {
+                            // kostal_status: AC_Leistung_Status = Einspeisen MPP || Aus
+                            pos1 = data.find("Status</td>");
+                            pos2 = data.find("</td>", pos1 + 20);
+                            std::string acLeistungStatus = data.substr(pos1 + 33, pos2 - pos1 - 33);
+                            id(kostal_status).publish_state(acLeistungStatus);
+                            ESP_LOGD("develop", "AC_Leistung_Status: %.2f", acLeistungStatus);
 
-                          // Kostal piko 5.5 inverter is offline
-                          id(kostal_l1_power).publish_state(0.00);
-                          id(kostal_l2_power).publish_state(0.00);
-                          id(kostal_l3_power).publish_state(0.00);
-                          id(kostal_power_east).publish_state(0.00);
-                          id(kostal_power_west).publish_state(0.00);
+                            // kostal_total: Energie_Gesamtertrag kWh
+                            pos1 = data.find("Gesamtenergie</td>");
+                            pos2 = data.find("</td>", pos1 + 30);
+                            std::string energieGesamtertrag = data.substr(pos1 + 70, pos2 - pos1 - 70);
+                            float energieGesamtertragFloat = std::stof(energieGesamtertrag);
+                            id(kostal_total).publish_state(energieGesamtertragFloat);
+                            ESP_LOGD("develop", "Energie_Gesamtertrag: %.2f", energieGesamtertragFloat);
+
+                            // kostal_day: Energie_Tagesertrag_Aktuell kWh
+                            pos1 = data.find("Tagesenergie</td>");
+                            pos2 = data.find("</td>", pos1 + 20);
+                            std::string energieTagesertragAktuell = data.substr(pos1 + 70, pos2 - pos1 - 70);
+                            float energieTagesertragAktuellFloat = std::stof(energieTagesertragAktuell);
+
+                            // kostal_day: reset the kostal_day after midnight
+                            if((id(time_sntp).now().hour>0.00 and id(time_sntp).now().hour<1.00) and acLeistungAktuellFloat==0.00){
+                              energieTagesertragAktuellFloat = 0.00;
+                            }
+                            id(kostal_day).publish_state(energieTagesertragAktuellFloat);
+                            ESP_LOGD("develop", "Energie_Tagesertrag_Aktuell: %.2f", energieTagesertragAktuellFloat);
+
+                            if(id(kostal_aktuell).has_state() and id(kostal_aktuell).state > 0.00){
+
+                                // PV_Generator_String1_Spannung Volt
+                                pos1 = data.find("Spannung</td>", pos2);
+                                pos2 = data.find("</td>", pos1 + 20);
+                                std::string s1Volt = data.substr(pos1 + 66, pos2 - pos1 - 66);
+                                float s1VoltFloat = std::stof(s1Volt);
+
+                                // Ausgangsleistung_L1_Spannung Volt
+                                pos1 = data.find("Spannung</td>", pos2);
+                                pos2 = data.find("</td>", pos1 + 20);
+
+                                // PV_Generator_String1_Strom Ampere
+                                pos1 = data.find("Strom</td>", pos2);
+                                pos2 = data.find("</td>", pos1 + 20);
+                                std::string pvGeneratorString1Strom = data.substr(pos1 + 63, pos2 - pos1 - 63);
+                                float pvGeneratorString1StromFloat = std::stof(pvGeneratorString1Strom);
+                                ESP_LOGD("develop", "PV_Generator_String1_Strom: %.2f", pvGeneratorString1StromFloat);
+
+                                // kostal_l1_power: Ausgangsleistung_L1_Leistung Watt
+                                pos1 = data.find("Leistung</td>", pos2);
+                                pos2 = data.find("</td>", pos1 + 20);
+                                std::string pvGeneratorString1Power = data.substr(pos1 + 66, pos2 - pos1 - 66);
+                                float pvGeneratorString1PowerFloat = std::stof(pvGeneratorString1Power);
+                                id(kostal_l1_power).publish_state(pvGeneratorString1PowerFloat);
+                                ESP_LOGD("develop", "Ausgangsleistung_L1_Leistung: %.2f", pvGeneratorString1PowerFloat);
+
+                                // PV_Generator_String2_Spannung Volt
+                                pos1 = data.find("Spannung</td>", pos2);
+                                pos2 = data.find("</td>", pos1 + 20);
+                                std::string s2Volt = data.substr(pos1 + 66, pos2 - pos1 - 66);
+                                float s2VoltFloat = std::stof(s2Volt);
+                                ESP_LOGD("develop", "PV_Generator_String2_Spannung: %.2f", s2VoltFloat);
+
+                                // Ausgangsleistung_L2_Spannung Volt
+                                pos1 = data.find("Spannung</td>", pos2);
+                                pos2 = data.find("</td>", pos1 + 20);
+
+                                // PV_Generator_String2_Strom Ampere
+                                pos1 = data.find("Strom</td>", pos2);
+                                pos2 = data.find("</td>", pos1 + 20);
+                                std::string pvGeneratorString2Strom = data.substr(pos1 + 63, pos2 - pos1 - 63);
+                                float pvGeneratorString2StromFloat = std::stof(pvGeneratorString2Strom);
+                                ESP_LOGD("develop", "PV_Generator_String2_Strom: %.2f", pvGeneratorString2StromFloat);
+
+                                // kostal_l2_power: Ausgangsleistung_L2_Leistung Watt
+                                pos1 = data.find("Leistung</td>", pos2);
+                                pos2 = data.find("</td>", pos1 + 20);
+                                std::string pvGeneratorString2Power = data.substr(pos1 + 66, pos2 - pos1 - 66);
+                                float pvGeneratorString2PowerFloat = std::stof(pvGeneratorString2Power);
+                                id(kostal_l2_power).publish_state(pvGeneratorString2PowerFloat);
+                                ESP_LOGD("develop", "Ausgangsleistung_L2_Leistung: %.2f", kostal_l2_power);
+
+                                // PV_Generator_String3_Spannung Volt
+                                pos1 = data.find("Spannung</td>", pos2);
+                                pos2 = data.find("</td>", pos1 + 20);
+
+                                // Ausgangsleistung_L3_Spannung Volt
+                                pos1 = data.find("Spannung</td>", pos2);
+                                pos2 = data.find("</td>", pos1 + 20);
+
+                                // PV_Generator_String3_Strom Ampere
+                                pos1 = data.find("Strom</td>", pos2);
+                                pos2 = data.find("</td>", pos1 + 20);
+
+                                // kostal_l3_power: Ausgangsleistung_L3_Leistung Watt
+                                pos1 = data.find("Leistung</td>", pos2);
+                                pos2 = data.find("</td>", pos1 + 20);
+                                std::string pvGeneratorString3Power = data.substr(pos1 + 66, pos2 - pos1 - 66);
+                                float pvGeneratorString3PowerFloat = std::stof(pvGeneratorString3Power);
+                                id(kostal_l3_power).publish_state(pvGeneratorString3PowerFloat);
+                                ESP_LOGD("develop", "Ausgangsleistung_L3_Leistung: %.2f", pvGeneratorString3PowerFloat);
+
+                                // kostal_power_east / kostal_power_west : calc the power ratio east to west
+                                float pvPowerS1 = s1VoltFloat * pvGeneratorString1StromFloat;
+                                float pvPowerS2 = s2VoltFloat * pvGeneratorString2StromFloat;
+                                ESP_LOGD("develop", "PV Power: Ost: %.2f, West: %.2f", pvPowerS1, pvPowerS2);
+
+                                float pvPower = pvPowerS1+pvPowerS2;
+                                ESP_LOGD("develop", "Total Power: Ost+West: %.2f", pvPower);
+                                float powerRatioEast = 0.00;
+                                float powerRatioWest = 0.00;
+                                if(pvPower){
+                                  powerRatioEast = (pvPowerS1 / pvPower) * 100;
+                                  powerRatioWest = (pvPowerS2 / pvPower) * 100;
+                                }
+                                id(kostal_power_east).publish_state(powerRatioEast);
+                                id(kostal_power_west).publish_state(powerRatioWest);
+                                ESP_LOGD("develop", "PV Power ratio: Ost: %.2f, West: %.2f", powerRatioEast, powerRatioWest);
+
+                            } else {
+
+                              // Kostal piko 5.5 inverter is offline
+                              id(kostal_l1_power).publish_state(0.00);
+                              id(kostal_l2_power).publish_state(0.00);
+                              id(kostal_l3_power).publish_state(0.00);
+                              id(kostal_power_east).publish_state(0.00);
+                              id(kostal_power_west).publish_state(0.00);
+
+                            }
+
+                            // update the history
+                            if(id(last_value) > 0.00 and energieTagesertragAktuellFloat > 0.00){
+                              float v = energieTagesertragAktuellFloat - float(id(last_value));
+                              id(hour_value)+=v;
+                              id(week_value)+=v;
+                              id(month_value)+=v;
+                              id(year_value)+=v;
+                            }
+
+                            ESP_LOGD("develop", "History last_value: %.2f", energieTagesertragAktuellFloat);
+                            id(last_value) = energieTagesertragAktuellFloat;
+
+                            // try to clean the memory ??
+                            data = "";
+
+                            // update the state info
+                            id(kostal_webinterface_status).publish_state("Ready");
+                            id(kostal_webinterface_ready).publish_state(true);  
+
+                        }else{
+
+                          ESP_LOGE("system", "Fatal ERROR Http request data");
+                          id(kostal_status).publish_state("Aus");
+                          id(kostal_webinterface_status).publish_state("Error");
+                          id(kostal_webinterface_ready).publish_state(false);
 
                         }
-
-                        // update the history
-                        if(id(last_value) > 0.00 and energieTagesertragAktuellFloat > 0.00){
-                          float v = energieTagesertragAktuellFloat - float(id(last_value));
-                          id(hour_value)+=v;
-                          id(week_value)+=v;
-                          id(month_value)+=v;
-                          id(year_value)+=v;
-                        }
-
-                        ESP_LOGD("develop", "History last_value: %.2f", energieTagesertragAktuellFloat);
-                        id(last_value) = energieTagesertragAktuellFloat;
-
-                        // try to clean the memory ??
-                        data = "";
-
-                        // update the state info
-                        id(kostal_webinterface_status).publish_state("Ready");
-                        id(kostal_webinterface_ready).publish_state(true);
 
                     - logger.log:
                         tag: "develop"
@@ -655,6 +710,7 @@ script:
                         id(kostal_webinterface_ready).publish_state(false);
 
             - then:
+              
                 - script.execute: updateHistorydata
                 - script.wait: updateHistorydata
 
@@ -683,6 +739,18 @@ script:
           id(kostal_month).publish_state( id(month_value) );
           id(kostal_lastmonth).publish_state( id(lastmonth_value) );
           id(kostal_year).publish_state( id(year_value) );
+          if( id(sunon)==1 and id(kostal_aktuell).state==0.00 ){
+            ESP_LOGW("main", "Check Kostal Piko 5.5, no production !!!" );
+          }      
+      - component.update: kostal_solar_panel_power      
+      - component.update: kostal_solar_panel_faktor
+      - component.update: sysfreemapmin
+      - component.update: sysfreeheap    
+## ------------------------
+## COMPONENT DEBUG
+## ------------------------
+debug:
+  update_interval: 2s
 
 ## ------------------------
 ## SWITCHES
@@ -690,6 +758,7 @@ script:
 switch:
   - platform: template
     name: "Boot Counter Reset"
+    id: btn_bc
     icon: mdi:lock-reset
     turn_on_action:
       then:
@@ -703,6 +772,7 @@ switch:
   # reset all global vars
   - platform: template
     name: "Historydata reset values"
+    id: btn_rsv
     turn_on_action:
       then:
         - lambda: |-
@@ -716,6 +786,7 @@ switch:
             id(lastmonth_value) = 0.00;
             id(year_value) = 0.00;
         - script.execute: updateHistorydata
+        - script.wait: updateHistorydata
         - logger.log:
             level: INFO
             tag: "system"
@@ -728,28 +799,38 @@ switch:
 
   - platform: safe_mode
     name: "Device restart Safe Mode"
+    id: btn_rsm
     icon: mdi:restart
 
   - platform: factory_reset
     name: Device restart factory defaults
+    id: btn_fcr
     icon: mdi:restart
 
 ## ------------------------
 ## BINARY SENSORS
 ## ------------------------
 binary_sensor:
-  # Einspeisen MPP
+
+  # Einspeisen MPP: Aus=false, Einspeisen MPP=true
   - platform: template
-    name: "Energie Produktion"
-    icon: mdi:toggle-switch-variant-off
+    name: "Energie Produktion aktiv"
+    icon: mdi:solar-power-variant-outline
     id: kostal_production_on
     lambda: return id(kostal_status).has_state() and id(kostal_status).state == id(pikostateon);
 
-  # Webinterface Kostal Piko ready
+  # Webinterface Kostal Piko ready (updated by script)
   - platform: template
     name: "Kostal Pico Status"
-    icon: mdi:toggle-switch-variant-off
+    icon: mdi:lightning-bolt-circle
     id: kostal_webinterface_ready
+
+  # Check production, sun is on and kostal current power>0 = true else false
+  - platform: template
+    name: "Energie Produktion"
+    icon: mdi:toggle-switch-variant-off
+    id: sun_production_on
+    lambda: return (id(sunon)==1 and id(kostal_aktuell).has_state() and id(kostal_aktuell).state > 0.00 );
 
 ## ------------------------
 ## SENSORS
@@ -765,7 +846,6 @@ sensor:
     state_class: total_increasing
     device_class: energy
     unit_of_measurement: "W"
-    update_interval: ${datadelay}
 
   # Energie Produktion pro Stunde (updated by script)
   - platform: template
@@ -776,7 +856,6 @@ sensor:
     state_class: total_increasing
     device_class: energy
     unit_of_measurement: "kWh"
-    update_interval: ${datadelay}
 
   # Energie Produktion pro Tag (updated by script)
   - platform: template
@@ -787,7 +866,6 @@ sensor:
     state_class: total_increasing
     device_class: energy
     unit_of_measurement: "kWh"
-    update_interval: ${datadelay}
 
   # Energie Produktion voriger Tag (updated by script)
   - platform: template
@@ -798,7 +876,6 @@ sensor:
     state_class: total_increasing
     device_class: energy
     unit_of_measurement: "kWh"
-    update_interval: ${datadelay}
 
   # Energie Produktion aktuelle Woche (updated by script)
   - platform: template
@@ -809,7 +886,6 @@ sensor:
     state_class: total_increasing
     device_class: energy
     unit_of_measurement: "kWh"
-    update_interval: ${datadelay}
 
   # Energie Produktion aktueller Monat (updated by script)
   - platform: template
@@ -820,7 +896,6 @@ sensor:
     state_class: total_increasing
     device_class: energy
     unit_of_measurement: "kWh"
-    update_interval: ${datadelay}
 
   # Energie Produktion voriger Monat (updated by script)
   - platform: template
@@ -831,7 +906,6 @@ sensor:
     state_class: total_increasing
     device_class: energy
     unit_of_measurement: "kWh"
-    update_interval: ${datadelay}
 
   # Energie Produktion aktuelles Jahr (updated by script)
   - platform: template
@@ -842,7 +916,6 @@ sensor:
     state_class: total_increasing
     device_class: energy
     unit_of_measurement: "kWh"
-    update_interval: ${datadelay}
 
   # Energie Produktion gesamt seit installation (updated by script)
   - platform: template
@@ -853,7 +926,6 @@ sensor:
     state_class: total_increasing
     device_class: energy
     unit_of_measurement: "kWh"
-    update_interval: ${datadelay}
 
   # Leistung Produktion Phase 1 (updated by script)
   - platform: template
@@ -864,7 +936,6 @@ sensor:
     state_class: total_increasing
     device_class: energy
     unit_of_measurement: "W"
-    update_interval: ${datadelay}
 
   # Leistung Produktion Phase 2 (updated by script)
   - platform: template
@@ -875,7 +946,6 @@ sensor:
     state_class: total_increasing
     device_class: energy
     unit_of_measurement: "W"
-    update_interval: ${datadelay}
 
   # Leistung Produktion Phase 3 (updated by script)
   - platform: template
@@ -886,11 +956,10 @@ sensor:
     state_class: total_increasing
     device_class: energy
     unit_of_measurement: "W"
-    update_interval: ${datadelay}
 
   # Solar Panel Leistung (simple, just a testcase)
   # better get the current power from solcast.com
-  # https://solcast.com/solar-radiation-map/europe
+  # https://solcast.com/solar-radiation-map/europe  
   - platform: template
     name: "Solar Panel Leistung"
     id: kostal_solar_panel_power
@@ -898,11 +967,13 @@ sensor:
     accuracy_decimals: 2
     state_class: measurement
     device_class: energy
-    unit_of_measurement: "W"
+    unit_of_measurement: "W"    
     lambda: |-
-      if(id(sun_elevation).has_state() and id(sun_elevation).state>1.00){
-       return ( (24.00*260.00*0.9) * (id(sun_elevation).state/100.00) );
+      if(id(sun_elevation).has_state()){
+        ESP_LOGD("kostal", "Installierte Leistung %.2f, Sonnenhöhe:%.2f", id(kwhpeak),id(sun_elevation).state); 
+        return (id(kwhpeak)*id(sun_elevation).state*0.01);        
       }else{
+       ESP_LOGW("kostal", "Keine Solarleistung vorhanden, Sonnenhöhe:%.2f", id(sun_elevation).state); 
        return 0.00;
       }
 
@@ -913,11 +984,12 @@ sensor:
     icon: mdi:percent-outline
     accuracy_decimals: 2
     state_class: measurement
-    unit_of_measurement: "%"
+    unit_of_measurement: "%"    
     lambda: |-
-      if(id(kostal_aktuell).has_state() and id(kostal_solar_panel_power).has_state() and id(kostal_solar_panel_power).state>0.00){
-         return id(kostal_aktuell).state / id(kostal_solar_panel_power).state;
+      if(id(kostal_aktuell).has_state() and id(kostal_solar_panel_power).has_state() and id(kostal_solar_panel_power).state>0.00){               
+         return (id(kostal_aktuell).state / id(kostal_solar_panel_power).state)*100;
       }else{
+         ESP_LOGW("kostal", "Kein Leisungsfaktor, Kostal:%.2f,  Sonnenleistung: %.2f",id(kostal_aktuell).state, id(kostal_solar_panel_power).state);
          return 0.00;
       }
 
@@ -929,7 +1001,6 @@ sensor:
     accuracy_decimals: 2
     state_class: measurement
     unit_of_measurement: "%"
-    update_interval: ${datadelay}
 
   # Leistung Produktions Anteil Ost (updated by script)
   - platform: template
@@ -939,7 +1010,6 @@ sensor:
     accuracy_decimals: 2
     state_class: measurement
     unit_of_measurement: "%"
-    update_interval: ${datadelay}
 
   # aktuelle Sonnenhöhe
   # default: updates based on the datadelay settings
@@ -947,23 +1017,13 @@ sensor:
     name: Sonnehöhe
     id: sun_elevation
     type: elevation
-    update_interval: ${datadelay}
-    on_value:
-      then:
-        - logger.log:
-            level: WARN
-            format: "sun_elevation changed"
-        # get the data from the kostal pico inverter
-        - script.execute: readKostalPicoData
-        - script.wait: readKostalPicoData
-
+    
   # aktuelle Sonnenrichtung
   - platform: sun
     name: Sonnenrichtung
     id: sun_anzimuth
     type: azimuth
-    update_interval: ${datadelay}
-
+    
   # Wifi quality RSSI (%)
   - platform: wifi_signal
     name: "Device WLAN Signal"
@@ -986,7 +1046,7 @@ sensor:
     entity_category: "diagnostic"
     state_class: "measurement"
     accuracy_decimals: 2
-
+    
   # device internal temperature (only webview)
   - platform: internal_temperature
     name: Device Internal Temperature
@@ -1006,34 +1066,6 @@ sensor:
     state_class: "measurement"
     entity_category: "diagnostic"
     lambda: return (id(boot_counter));
-    update_interval: ${datadelay}
-
-  # the current size of free heap memory.
-  - platform: template
-    name: Free Heap Min
-    lambda: return {static_cast<float>(esp_get_minimum_free_heap_size())};
-    unit_of_measurement: B
-    update_interval: 2s
-    entity_category: "diagnostic"
-    on_value:
-      then:
-        - if:
-            condition:
-              lambda: return x < 50000.00;
-            then:
-              - logger.log:
-                  level: ERROR
-                  format: "WARNING FREE HEAP MAP is low: %f bytes"
-                  args:
-                    - x
-
-  # Minimum free heap ever available
-  - platform: template
-    name: Free Heap
-    lambda: return {static_cast<float>(esp_get_free_heap_size())};
-    unit_of_measurement: B
-    update_interval: 2s
-    entity_category: "diagnostic"
 
   # service call delay (updated by script)
   - platform: template
@@ -1044,8 +1076,49 @@ sensor:
     unit_of_measurement: "sec"
     state_class: "measurement"
     entity_category: "diagnostic"
-    update_interval: ${datadelay}
 
+  # the current size of free heap memory.
+  - platform: template
+    name: Free Heap Min
+    id: sysfreemapmin
+    icon: mdi:counter
+    lambda: return {static_cast<float>(esp_get_minimum_free_heap_size())};
+    unit_of_measurement: B
+    update_interval: 2s
+    entity_category: "diagnostic"
+    on_value:
+      then:
+        - if:
+            condition:
+              lambda: return x < 30000.00;
+            then:
+              - logger.log:
+                  level: ERROR
+                  format: "WARNING FREE HEAP MAP is low: %f bytes"
+                  args:
+                    - x
+
+  # Minimum free heap ever available
+  - platform: template
+    name: Free Heap
+    id: sysfreeheap
+    icon: mdi:counter
+    lambda: return {static_cast<float>(esp_get_free_heap_size())};
+    unit_of_measurement: B
+    update_interval: 2s
+    entity_category: "diagnostic"
+
+  # only for logging
+  - platform: debug
+    free:
+        name: "Heap Free"
+        id: debug_heapfree        
+        disabled_by_default: true
+    block:
+      name: "Heap Max Block"
+      id: debug_heapmaxblock
+      disabled_by_default: true
+  
 ## ------------------------
 ## TEXT SENSORS
 ## ------------------------
@@ -1053,37 +1126,34 @@ text_sensor:
   # Kostal status (updated by script)
   - platform: template
     name: "Kostal Pico Status"
+    id: kostal_status
     disabled_by_default: true
     icon: mdi:alarm-note
-    id: kostal_status
-    update_interval: ${datadelay}
 
   # Kostal webinterface status (updated by script)
   - platform: template
     name: "Kostal Pico Verbindung"
     id: kostal_webinterface_status
     icon: mdi:alarm-note
-    update_interval: ${datadelay}
 
   # Kostal Daten Zeitstempel (updated by script)
   - platform: template
-    name: "Kostal Pico Timestamp"
-    disabled_by_default: true
+    name: "Kostal Pico Timestamp"    
     id: kostal_datatime
     icon: mdi:clock-start
-    update_interval: ${datadelay}
+    disabled_by_default: true
 
   # Zeit Sonnenaufgang
   - platform: sun
     name: Sonnenaufgang am
+    id: sun_sunrise
     type: sunrise
-    update_interval: ${datadelay}
 
   # Zeit Sonnenaufgang
   - platform: sun
     name: Sonnenuntergang am
+    id: sun_sunset
     type: sunset
-    update_interval: ${datadelay}
 
   # Last boot timestamp (updated by device boot)
   - platform: template
@@ -1091,7 +1161,6 @@ text_sensor:
     disabled_by_default: true
     id: device_lastBoot_time
     icon: mdi:clock-start
-    update_interval: ${datadelay}
     on_value:
       then:
         - logger.log:
@@ -1121,6 +1190,7 @@ text_sensor:
   # installed esphome version
   - platform: version
     name: "ESPHome Version"
+    id: eshome_version
     hide_timestamp: true
     disabled_by_default: true
     icon: mdi:information-box-outline
