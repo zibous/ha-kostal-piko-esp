@@ -558,7 +558,7 @@ script:
                           pos2 = data.find("</td>", pos1 + 20);
                           std::string acLeistungStatus = data.substr(pos1 + 33, pos2 - pos1 - 33);
                           id(kostal_status).publish_state(acLeistungStatus);
-                          ESP_LOGD("develop", "AC_Leistung_Status: %.2f", acLeistungStatus);
+                          ESP_LOGD("develop", "AC_Leistung_Status: %s", acLeistungStatus.c_str());
 
                           // kostal_total: Energie_Gesamtertrag kWh
                           pos1 = data.find("Gesamtenergie</td>");
