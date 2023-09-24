@@ -10,7 +10,7 @@
 [license-shield]: https://img.shields.io/static/v1?label=License&message=MIT&color=orange&logo=license
 [license]: https://opensource.org/licenses/MIT
 
-[esphome-release-shield]: https://img.shields.io/static/v1?label=ESPHome&message=2023.5.5&color=green&logo=esphome
+[esphome-release-shield]: https://img.shields.io/static/v1?label=ESPHome&message=2023.8.3&color=green&logo=esphome
 [esphome-release]: https://GitHub.com/esphome/esphome/releases/
 
 [open-in-vscode-shield]: https://img.shields.io/static/v1?label=+&message=Open+in+VSCode&color=blue&logo=visualstudiocode
@@ -24,16 +24,24 @@ The ESPHome application loads the data from the Kostal PIKO 5.5 inverter at cycl
 ### Requirements
 - **ESPHOME** on Docker v2023.5.0-dev
 - **ESP32** 240MHz, 520KB RAM, 4MB Flash (ESP32 AZ-DELIVERY-DEVKIT-V4)
-  <img src="../docs/esp32_pinlayout.png">
+  <img src="../docs/esp32_pinlayout.png">  
 - **ESPHOME** Configuration<br>
   [![](https://img.shields.io/badge/HA_KOSTAL_PICO_ESP.yaml-orange?style=for-the-badge)](https://github.com/zibous/ha-kostal-piko-esp/blob/main/esphome/config/kostal-piko.yaml)
+
 <br>
 
 ## TODO
- - find a better method to parse the html data custom_componet ???
+
+ - find a better method to parse the html data (**custom_component**) ???
+   
+	From the looks of it, the http component is not very reliable, because it often happens that a new boot process occurs. So far I haven't figured out what it could be. If the issue also happens with the HTTPClient class that would suggest the error is in the arduino framework, not directly in esphome ???
+
+   <br> 
  
+ 	Get the data from the http request
+ 	
    ```
-	// get the data from the http request
+	
 	std::string data = id(http_request_data).get_string(); ## ??? memory leaks 
 	
 	if( !data.empty() ) {
@@ -251,6 +259,11 @@ The ESPHome application loads the data from the Kostal PIKO 5.5 inverter at cycl
 
 ## ESPHome Dashboard
 <img src="../docs/esp-appdata.png">
+
+[![](https://img.shields.io/badge/>> ESPHOME_DASHBOARD_SOURCE-blue?style=for-the-badge)]( https://github.com/zibous/ha-watermeter/tree/master/esphome/webserver)
+
+
+<br>
 
 ## Homeassistant
 

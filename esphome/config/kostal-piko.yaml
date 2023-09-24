@@ -766,6 +766,14 @@ switch:
             tag: "system"
             format: "${device_name_short} reset boot counter o.k!"
         - component.update: bootcounter
+
+  # get kostal piko data    
+  - platform: template
+    name: "Load Kostal Piko Data"
+    id: btn_getpikodata
+    icon: mdi:lock-reset    
+    turn_on_action:
+      then:      
         - script.execute: readKostalPicoData
         - script.wait: readKostalPicoData
 
@@ -801,11 +809,13 @@ switch:
     name: "Device restart Safe Mode"
     id: btn_rsm
     icon: mdi:restart
+    disabled_by_default: true
 
   - platform: factory_reset
     name: Device restart factory defaults
     id: btn_fcr
     icon: mdi:restart
+    disabled_by_default: true
 
 ## ------------------------
 ## BINARY SENSORS
