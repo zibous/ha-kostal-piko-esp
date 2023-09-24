@@ -260,7 +260,7 @@ The ESPHome application loads the data from the Kostal PIKO 5.5 inverter at cycl
 ## ESPHome Dashboard
 <img src="../docs/esp-appdata.png">
 
-[![](https://img.shields.io/badge/>> ESPHOME_DASHBOARD_SOURCE-blue?style=for-the-badge)]( https://github.com/zibous/ha-watermeter/tree/master/esphome/webserver)
+[![](https://img.shields.io/badge/ESPHOME_DASHBOARD_SOURCE-blue?style=for-the-badge)]( https://github.com/zibous/ha-watermeter/tree/master/esphome/webserver)
 
 
 <br>
