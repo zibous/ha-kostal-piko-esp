@@ -10,10 +10,10 @@ substitutions:
 
   # device settings
   device_name_short: "kostal-piko"
-  device_description: "PRODUCTION: Read data from KOSTAL Solar Electric Pico 5.5 inverter"
+  device_description: "PRODUCTION: Read data from KOSTAL Solar Electric Pico 5.5 inverter (az-delivery-devkit-v4)"
   projectname: "kostal.piko"
   friendly_name: "kostal"
-  appversion: "1.1.1"
+  appversion: "1.1.0"
   domain: !secret domain
 
   ## all for the data service
@@ -23,7 +23,7 @@ substitutions:
 
   ## logger settings
   log_level: "VERBOSE" # use WARN for production mode to save memory.
-  log_baudrate: "115200"    # use 0 to disable serial UART port logging.
+  log_baudrate: "115200" # use 0 to disable serial UART port logging.
 
   ## device configuration
   ## HARDWARE: HARDWARE: ESP32 240MHz, 520KB RAM, 4MB Flash
@@ -36,11 +36,7 @@ substitutions:
 ## ------------------------
 esp32:
   board: ${board}
-  # framework:
-  #   type: arduino
-  #   version: 2.0.9
-  #   platform_version: 6.3.0
-
+  
 # Customize the frequency in which data is flushed to the flash.
 preferences:
   flash_write_interval: 10min
@@ -72,16 +68,18 @@ esphome:
   on_boot:
     then:
       - globals.set:
-          id: boot_counter
+          id: boot_counter          
           value: !lambda "return id(boot_counter)+=1;"
       - logger.log:
           level: WARN
+          tag: "system"
           format: "BOOTMESSAGE:${device_name_short} API is connected, Device ready!"
       - component.update: bootcounter
   on_shutdown:
     then:
       - logger.log:
           level: WARN
+          tag: "system"
           format: "${device_name_short} is down!"
 
 ## ---------------------------------------------------
@@ -89,20 +87,16 @@ esphome:
 ## ---------------------------------------------------
 wifi:
   networks:
-    # office apple capsulate accesspoint 2.4Ghz
-    - ssid: !secret ssid3_name
-      password: !secret ssid3_pswd
-      # priority: 1
     # living room apple capsulate accesspoint 2.4Ghz
     - ssid: !secret ssid2_name
       password: !secret ssid2_pswd
-      # priority: 2
+    # office apple capsulate accesspoint 2.4Ghz
+    - ssid: !secret ssid3_name
+      password: !secret ssid3_pswd
     # unifi accesspoint 2.4Ghz
     - ssid: !secret ssid4_name
       password: !secret ssid4_pswd
-      # priority: 0
   domain: !secret domain
-  #  simple ap config which will set up the access point to have the devices name as the ssid with no password.
   ap: {}
 
 ## ------------------------
@@ -118,14 +112,14 @@ external_components:
   # https://github.com/zdzichu6969/esphome-components
   - source:
       type: local
-      path: external_components
+      path: custom_components
     components: [backup]
 
   # optinal: use local component from
   # https://github.com/TheStaticTurtle/esphome_syslog
   - source:
       type: local
-      path: external_components
+      path: custom_components
     components: [syslog]
 
 ## ------------------------
@@ -148,12 +142,17 @@ logger:
   logs:
     sensor: WARN
     sensor.filter: WARN
+    binary_sensor: WARN
     text_sensor: WARN
-    api.service: ERROR
-    json: ERROR
+    switch: WARN    
     mqtt: WARN
     wifi: WARN
+    http_request: WARN
+    api.service: ERROR
+    component: ERROR
+    json: ERROR
     scheduler: ERROR
+    esp32.preferences: ERROR
     developer: DEBUG
 
 ## ------------------------
@@ -171,7 +170,6 @@ backup:
 web_server:
   port: 80
   version: 2
-  # set the url for the internal webserver
   js_url: !secret webserver_jsurl
 
 ## ------------------------
@@ -183,22 +181,26 @@ ota:
   on_begin:
     then:
       - logger.log:
+          tag: "system"
           format: "OTA START"
           level: WARN
   on_progress:
     then:
       - logger.log:
+          tag: "system"
           level: WARN
           format: "OTA progress %0.1f%%"
           args: ["x"]
   on_end:
     then:
       - logger.log:
+          tag: "system"
           format: "OTA END"
           level: WARN
   on_error:
     then:
       - logger.log:
+          tag: "system"
           format: "OTA update error %d"
           level: ERROR
           args: ["x"]
@@ -260,7 +262,6 @@ api:
 # Global variables
 ## ------------------------
 globals:
-
   - id: boot_counter
     type: int
     restore_value: yes
@@ -331,9 +332,9 @@ time:
     id: time_sntp
     timezone: Europe/Berlin
     servers:
-       - !secret local_sntp
-       - 0.pool.ntp.org
-       - 1.pool.ntp.org
+      - !secret local_sntp
+      - 0.pool.ntp.org
+      - 1.pool.ntp.org
 
     on_time_sync:
       # Components should trigger on_time_sync when they update the system clock.
@@ -370,9 +371,9 @@ time:
               format: "Reset value hour, starting next hour"
 
       # reset daily value and set yesterday value
-      - seconds: 0
-        minutes: 59
-        hours: 23
+      - seconds: 5
+        minutes: 0
+        hours: 0
         then:
           - lambda: |-
               id(yesterday_value)=id(kostal_day).state;
@@ -383,9 +384,9 @@ time:
               format: "Set yesterday value and reset value daily, starting new day"
 
       # reset weekly value, start new week
-      - seconds: 0
-        minutes: 59
-        hours: 23
+      - seconds: 5
+        minutes: 0
+        hours: 0
         days_of_week: MON
         then:
           - globals.set:
@@ -397,9 +398,10 @@ time:
               level: INFO
               format: "Reset value weekly, starting new week"
 
-      - seconds: 0
-        minutes: 59
-        hours: 23
+       # reset monthly value, start new week
+      - seconds: 5
+        minutes: 0
+        hours: 0
         days_of_month: 1
         then:
           - lambda: |-
@@ -415,9 +417,9 @@ time:
           - logger.log: Reset value monthly, starting new month
 
       # new year, reset yearly value
-      - seconds: 0
-        minutes: 59
-        hours: 23
+      - seconds: 5
+        minutes: 0
+        hours: 0
         days_of_month: 1
         months: JAN
         then:
@@ -463,7 +465,7 @@ http_request:
   id: http_request_data
   useragent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:109.0) Gecko/20100101 Firefox/113.0"
   # timeout (Optional, Time): Timeout for request. Defaults to 5s.
-  # timeout: 500ms
+  timeout: 2s
 
 ## ------------------------
 ## COMPONENT INTERVALL
@@ -479,12 +481,11 @@ interval:
 ## ALL SCRIPTS
 ## ------------------------
 script:
-
   # get the kostal pico data (production mode) - get the data from the kostal pico inverter
   - id: readKostalPicoData
     then:
       - logger.log:
-          tag: "system"
+          tag: "develop"
           level: WARN
           format: "Start get Data: ${dataurl}"
 
@@ -513,16 +514,13 @@ script:
                           - status_code
                           - duration_ms
 
-                    # @TODO: find a better method to parse the html data
+                    # @TODO: find a better method to parse the html data custom_componet ???
                     - lambda: |-
 
                         // get the data from the http request
                         std::string data = id(http_request_data).get_string();
 
                         if( !data.empty() ) {
-
-                            id(sysfreemapmin).update();
-                            id(sysfreeheap).update();
 
                             id(kostal_webinterface_status).publish_state("Decode Data");
 
@@ -618,7 +616,7 @@ script:
                                 std::string pvGeneratorString2Power = data.substr(pos1 + 66, pos2 - pos1 - 66);
                                 float pvGeneratorString2PowerFloat = std::stof(pvGeneratorString2Power);
                                 id(kostal_l2_power).publish_state(pvGeneratorString2PowerFloat);
-                                ESP_LOGD("develop", "Ausgangsleistung_L2_Leistung: %.2f", pvGeneratorString2PowerFloat);
+                                ESP_LOGD("develop", "Ausgangsleistung_L2_Leistung: %.2f", kostal_l2_power);
 
                                 // PV_Generator_String3_Spannung Volt
                                 pos1 = data.find("Spannung</td>", pos2);
@@ -680,6 +678,9 @@ script:
                             ESP_LOGD("develop", "History last_value: %.2f", energieTagesertragAktuellFloat);
                             id(last_value) = energieTagesertragAktuellFloat;
 
+                            // try to clean the memory ??
+                            data = "";
+
                             // update the state info
                             id(kostal_webinterface_status).publish_state("Ready");
                             id(kostal_webinterface_ready).publish_state(true);
@@ -712,7 +713,6 @@ script:
                         id(kostal_webinterface_ready).publish_state(false);
 
             - then:
-
                 - script.execute: updateHistorydata
                 - script.wait: updateHistorydata
 
@@ -746,19 +746,14 @@ script:
           }
       - component.update: kostal_solar_panel_power
       - component.update: kostal_solar_panel_faktor
-      - component.update: sysfreemapmin
-      - component.update: sysfreeheap
 
-## ------------------------
-## COMPONENT DEBUG
-## ------------------------
-debug:
-  update_interval: 2s
 
 ## ------------------------
 ## SWITCHES
 ## ------------------------
 switch:
+  
+  # reset boot counter and get the data from the pico converter 
   - platform: template
     name: "Boot Counter Reset"
     id: btn_bc
@@ -771,6 +766,8 @@ switch:
             tag: "system"
             format: "${device_name_short} reset boot counter o.k!"
         - component.update: bootcounter
+        - script.execute: readKostalPicoData
+        - script.wait: readKostalPicoData
 
   # reset all global vars
   - platform: template
@@ -814,7 +811,6 @@ switch:
 ## BINARY SENSORS
 ## ------------------------
 binary_sensor:
-
   # Einspeisen MPP: Aus=false, Einspeisen MPP=true
   - platform: template
     name: "Energie Produktion aktiv"
@@ -1038,16 +1034,6 @@ sensor:
     entity_category: "diagnostic"
     unit_of_measurement: "%"
 
-  # device internal temperature (only webview)
-  - platform: internal_temperature
-    name: Device Internal Temperature
-    id: device_internal_temperature
-    icon: mdi:thermometer-lines
-    state_class: "measurement"
-    update_interval: 60s
-    entity_category: "diagnostic"
-    disabled_by_default: true
-
   # Uptime device in hours
   - platform: uptime
     name: Device online seit
@@ -1079,37 +1065,6 @@ sensor:
     unit_of_measurement: "sec"
     state_class: "measurement"
     entity_category: "diagnostic"
-
-  # the current size of free heap memory.
-  - platform: template
-    name: Free Heap Min
-    id: sysfreemapmin
-    icon: mdi:counter
-    lambda: return {static_cast<float>(esp_get_minimum_free_heap_size())};
-    unit_of_measurement: B
-    update_interval: 2s
-    entity_category: "diagnostic"
-
-  # Minimum free heap ever available
-  - platform: template
-    name: Free Heap
-    id: sysfreeheap
-    icon: mdi:counter
-    lambda: return {static_cast<float>(esp_get_free_heap_size())};
-    unit_of_measurement: B
-    update_interval: 2s
-    entity_category: "diagnostic"
-
-  # only for logging
-  - platform: debug
-    free:
-      name: "Heap Free"
-      id: debug_heapfree
-      disabled_by_default: true
-    block:
-      name: "Heap Max Block"
-      id: debug_heapmaxblock
-      disabled_by_default: true
 
 ## ------------------------
 ## TEXT SENSORS
@@ -1159,9 +1114,9 @@ text_sensor:
             level: DEBUG
             format: "device_lastBoot_time changed"
         # init, try to get the data
-        - delay: 1s
-        - script.execute: readKostalPicoData
-        - script.wait: readKostalPicoData
+        # - delay: 1s
+        # - script.execute: readKostalPicoData
+        # - script.wait: readKostalPicoData
 
   # optional device timestamp (only for webserver)
   # default: updates every minute (60s)
